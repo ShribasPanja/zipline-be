@@ -1,0 +1,49 @@
+# Example Pipeline Configuration
+# Place this file at .zipline/pipeline.yml in your repository
+
+name: "Build and Test Pipeline"
+description: "Automated build, test, and deployment pipeline"
+
+steps:
+  - name: "Install Dependencies"
+    image: "node:18-alpine"
+    run: "npm install"
+
+  - name: "Run Tests"
+    image: "node:18-alpine"
+    run: "npm test"
+
+  - name: "Build Application"
+    image: "node:18-alpine"
+    run: "npm run build"
+
+  - name: "Security Scan"
+    image: "node:18-alpine"
+    run: "npm audit --audit-level=moderate"
+
+  - name: "Lint Code"
+    image: "node:18-alpine"
+    run: "npm run lint"
+# Alternative example for Python projects:
+# steps:
+#   - name: "Install Dependencies"
+#     image: "python:3.11-slim"
+#     run: "pip install -r requirements.txt"
+#
+#   - name: "Run Tests"
+#     image: "python:3.11-slim"
+#     run: "pytest"
+#
+#   - name: "Code Quality Check"
+#     image: "python:3.11-slim"
+#     run: "flake8 ."
+
+# For Docker-based projects:
+# steps:
+#   - name: "Build Docker Image"
+#     image: "docker:latest"
+#     run: "docker build -t myapp:latest ."
+#
+#   - name: "Run Container Tests"
+#     image: "docker:latest"
+#     run: "docker run --rm myapp:latest npm test"
