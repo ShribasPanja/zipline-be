@@ -4,6 +4,7 @@ import { ActivityService } from "../services/activity.service";
 import { PipelineService } from "../services/pipeline.service";
 import { ResponseHelper } from "../helpers/response.helper";
 import { DockerExecutionService } from "../services/docker.service";
+import { PipelineLogRepository } from "../repositories/pipelineLog.repository";
 
 export class PipelineController {
   static async executePipeline(req: Request, res: Response) {
@@ -102,23 +103,115 @@ export class PipelineController {
     }
   }
 
-  static async getExecutions(req: Request, res: Response) {
+  static async getExecutionLogs(req: Request, res: Response) {
     try {
-      const { repoName } = req.query;
+      const { executionId } = req.params;
 
-      let executions;
-      if (repoName) {
-        executions = PipelineService.getExecutionsByRepo(repoName as string);
-      } else {
-        executions = PipelineService.getAllExecutions();
+      if (!executionId) {
+        return ResponseHelper.error(res, "Execution ID is required", 400);
       }
 
-      const stats = PipelineService.getExecutionStats();
+      // Get pipeline run info
+      const { PipelineRunRepository } = await import(
+        "../repositories/pipelineRun.repository"
+      );
+      const pipelineRun = await PipelineRunRepository.findByExecutionId(
+        executionId
+      );
+
+      if (!pipelineRun) {
+        return ResponseHelper.error(res, "Pipeline execution not found", 404);
+      }
+
+      // Get logs
+      const logs = await PipelineLogRepository.getLogsByExecutionId(
+        executionId
+      );
 
       return ResponseHelper.success(
         res,
         {
-          executions,
+          id: pipelineRun.id,
+          executionId: pipelineRun.executionId,
+          status: pipelineRun.status.toLowerCase(),
+          repoName: pipelineRun.repoName,
+          repoUrl: pipelineRun.repoUrl,
+          branch: pipelineRun.branch,
+          triggerCommit: pipelineRun.triggerCommitId,
+          triggerAuthorName: pipelineRun.triggerAuthorName,
+          triggerAuthorEmail: pipelineRun.triggerAuthorEmail,
+          startedAt: pipelineRun.queuedAt,
+          completedAt: pipelineRun.finishedAt,
+          logs: logs.map((log) => ({
+            id: log.id,
+            timestamp: log.timestamp,
+            level: log.level,
+            message: log.message,
+            step: log.step,
+          })),
+        },
+        "Execution logs retrieved"
+      );
+    } catch (error: any) {
+      console.error("[API] Get execution logs failed:", error);
+      return ResponseHelper.error(
+        res,
+        error.message || "Internal server error",
+        500
+      );
+    }
+  }
+
+  static async getExecutions(req: Request, res: Response) {
+    try {
+      const { repoName, limit } = req.query;
+
+      // Get pipeline runs from database
+      const { PipelineRunRepository } = await import(
+        "../repositories/pipelineRun.repository"
+      );
+      const executions = await PipelineRunRepository.list({
+        repoName: repoName as string,
+        limit: limit ? parseInt(limit as string) : 50,
+      });
+
+      // Calculate basic stats
+      const total = executions.length;
+      const successful = executions.filter(
+        (e) => e.status === "SUCCESS"
+      ).length;
+      const failed = executions.filter((e) => e.status === "FAILED").length;
+      const inProgress = executions.filter(
+        (e) => e.status === "IN_PROGRESS"
+      ).length;
+
+      const stats = {
+        total,
+        successful,
+        failed,
+        inProgress,
+        successRate: total > 0 ? Math.round((successful / total) * 100) : 0,
+      };
+
+      return ResponseHelper.success(
+        res,
+        {
+          executions: executions.map((exec) => ({
+            id: exec.id,
+            executionId: exec.executionId,
+            repoName: exec.repoName,
+            repoUrl: exec.repoUrl,
+            branch: exec.branch,
+            status: exec.status.toLowerCase(),
+            triggerCommit: exec.triggerCommitId,
+            triggerAuthorName: exec.triggerAuthorName,
+            triggerAuthorEmail: exec.triggerAuthorEmail,
+            startedAt: exec.queuedAt,
+            completedAt: exec.finishedAt,
+            duration: exec.durationMs
+              ? `${Math.round(exec.durationMs / 1000)}s`
+              : null,
+          })),
           stats,
         },
         "Executions retrieved"

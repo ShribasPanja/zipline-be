@@ -163,7 +163,7 @@ export class GitHubService {
     repoFullName: string
   ): Promise<any> {
     try {
-      const hookUrl = "https://f85b7bd3173c.ngrok-free.app/webhook/github";
+      const hookUrl = "https://d2313811e4a6.ngrok-free.app/webhook/github";
 
       const response = await axios.post(
         `https://api.github.com/repos/${repoFullName}/hooks`,

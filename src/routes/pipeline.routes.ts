@@ -9,6 +9,12 @@ router.post("/execute", PipelineController.executePipeline);
 // GET /api/pipeline/executions/:executionId - Get specific execution status
 router.get("/executions/:executionId", PipelineController.getExecutionStatus);
 
+// GET /api/pipeline/executions/:executionId/logs - Get logs for specific execution
+router.get(
+  "/executions/:executionId/logs",
+  PipelineController.getExecutionLogs
+);
+
 // GET /api/pipeline/executions - Get all executions or filter by repo
 router.get("/executions", PipelineController.getExecutions);
 

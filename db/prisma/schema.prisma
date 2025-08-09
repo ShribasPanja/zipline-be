@@ -1,0 +1,63 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+  //output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum PipelineStatus {
+  QUEUED
+  IN_PROGRESS
+  SUCCESS
+  FAILED
+}
+
+model PipelineRun {
+  id                 String         @id @default(cuid())
+  executionId        String         @unique
+  jobId              String?
+  repoName           String
+  repoFullName       String?
+  repoUrl            String
+  branch             String?
+  status             PipelineStatus @default(QUEUED)
+  triggerCommitId    String?
+  triggerMessage     String?
+  triggerAuthorName  String?
+  triggerAuthorEmail String?
+  queuedAt           DateTime       @default(now())
+  startedAt          DateTime?
+  finishedAt         DateTime?
+  durationMs         Int?
+  logsUrl            String?
+  errorMessage       String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  logs PipelineLog[]
+
+  @@map("pipeline_runs")
+}
+
+model PipelineLog {
+  id        String      @id @default(cuid())
+  runId     String
+  run       PipelineRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  timestamp DateTime    @default(now())
+  level     String      @default("info")
+  message   String
+  step      String?
+
+  @@index([runId])
+  @@map("pipeline_logs")
+}

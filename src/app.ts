@@ -1,17 +1,22 @@
 import express from "express";
 import cors from "cors";
+import { createServer } from "http";
 import { config } from "./config";
 import routes from "./routes";
 import { errorHandler, notFoundHandler, requestLogger } from "./middleware";
+import SocketService from "./services/socket.service";
 
 class App {
   public app: express.Application;
+  public server: any;
 
   constructor() {
     this.app = express();
+    this.server = createServer(this.app);
     this.initializeMiddleware();
     this.initializeRoutes();
     this.initializeErrorHandling();
+    this.initializeSocket();
   }
 
   private initializeMiddleware(): void {
@@ -53,8 +58,14 @@ class App {
     this.app.use(errorHandler);
   }
 
+  private initializeSocket(): void {
+    // Initialize Socket.IO
+    const socketService = SocketService.getInstance();
+    socketService.initialize(this.server);
+  }
+
   public listen(): void {
-    this.app.listen(config.port, () => {
+    this.server.listen(config.port, () => {
       console.log(
         `[INFO] Backend server listening on http://localhost:${config.port}`
       );
