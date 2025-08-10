@@ -65,7 +65,7 @@ export class ActivityService {
       },
       status: "success",
       metadata: {
-        webhook_url: "https://d2313811e4a6.ngrok-free.app/webhook/github",
+        webhook_url: `${process.env.NGROK_URL}/webhook/github`,
         events: ["push"],
       },
     });

@@ -1,4 +1,4 @@
-import { addPipelineJob, getPipelineJobStatus } from "../queue/pipeline.queue";
+import { addDAGPipelineJob } from "../queue/dag-pipeline.queue";
 
 export interface PipelineExecution {
   id: string;
@@ -15,6 +15,7 @@ export interface PipelineExecution {
 export class PipelineService {
   private static executions: Map<string, PipelineExecution> = new Map();
 
+  // All pipeline executions now use DAG mode (parallel-capable)
   static async executePipelineAsync(
     repoUrl: string,
     repoName: string,
@@ -22,8 +23,25 @@ export class PipelineService {
     repository?: { name: string; full_name: string },
     triggerCommit?: { id: string; message: string }
   ): Promise<string> {
-    const executionId = `${repoName}-${Date.now()}`;
+    // Route to DAG execution (supports both parallel and sequential steps)
+    return this.executePipelineDAG(
+      repoUrl,
+      repoName,
+      branch,
+      repository,
+      triggerCommit
+    );
+  }
 
+  // DAG execution (handles both parallel dependencies and sequential steps)
+  static async executePipelineDAG(
+    repoUrl: string,
+    repoName: string,
+    branch?: string,
+    repository?: { name: string; full_name: string },
+    triggerCommit?: { id: string; message: string }
+  ): Promise<string> {
+    const executionId = `dag-${repoName}-${Date.now()}`;
     const execution: PipelineExecution = {
       id: executionId,
       repoName,
@@ -32,36 +50,23 @@ export class PipelineService {
       status: "queued",
       startTime: new Date(),
     };
-
     this.executions.set(executionId, execution);
 
-    try {
-      // Add job to the queue instead of running directly
-      const queueExecutionId = await addPipelineJob({
-        repoUrl,
-        repoName,
-        branch,
-        repository: repository || { name: repoName, full_name: repoName },
-        triggerCommit,
-      });
+    const queueExecutionId = await addDAGPipelineJob({
+      repoUrl,
+      repoName,
+      branch,
+      repository: repository || { name: repoName, full_name: repoName },
+    });
 
-      // Update execution with queue execution ID
-      execution.id = queueExecutionId;
-      execution.status = "queued";
-      this.executions.set(queueExecutionId, execution);
-      this.executions.delete(executionId);
+    execution.id = queueExecutionId;
+    this.executions.set(queueExecutionId, execution);
+    this.executions.delete(executionId);
 
-      console.log(
-        `[PIPELINE_SERVICE] Pipeline queued successfully with execution ID: ${queueExecutionId}`
-      );
-      return queueExecutionId;
-    } catch (error: any) {
-      console.error(`[PIPELINE_SERVICE] Failed to queue pipeline:`, error);
-      execution.status = "failed";
-      execution.endTime = new Date();
-      execution.result = { error: error.message };
-      throw error;
-    }
+    console.log(
+      `[PIPELINE_SERVICE] DAG pipeline queued with execution ID: ${queueExecutionId}`
+    );
+    return queueExecutionId;
   }
 
   static async getExecution(
@@ -70,23 +75,11 @@ export class PipelineService {
     const localExecution = this.executions.get(executionId);
 
     if (localExecution) {
-      // Update status from queue if available
-      try {
-        const queueStatus = await getPipelineJobStatus(executionId);
-        if (queueStatus.status !== "not_found") {
-          localExecution.status = this.mapQueueStatusToExecutionStatus(
-            queueStatus.status
-          );
-          if (queueStatus.finishedOn) {
-            localExecution.endTime = new Date(queueStatus.finishedOn);
-          }
-        }
-      } catch (error) {
-        console.warn(
-          `[PIPELINE_SERVICE] Failed to get queue status for ${executionId}:`,
-          error
-        );
-      }
+      // For DAG executions, status is managed internally
+      // TODO: Could add DAG job status checking if needed
+      console.log(
+        `[PIPELINE_SERVICE] Retrieved execution status for ${executionId}: ${localExecution.status}`
+      );
     }
 
     return localExecution;

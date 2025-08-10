@@ -20,29 +20,26 @@ export class PipelineController {
         );
       }
 
-      // Always execute pipeline asynchronously via queue
-      console.log(
-        `[API] Starting pipeline execution for ${repoName} via queue`
-      );
+      // All pipeline executions now use DAG orchestrator (supports both parallel and sequential steps)
+      console.log(`[API] Starting DAG pipeline execution for ${repoName}`);
 
-      const executionId = await PipelineService.executePipelineAsync(
+      const executionId = await PipelineService.executePipelineDAG(
         repoUrl,
         repoName,
         branch,
-        {
-          name: repoName,
-          full_name: repoName,
-        }
+        { name: repoName, full_name: repoName }
       );
 
-      console.log(`[API] Pipeline queued with execution ID: ${executionId}`);
+      console.log(
+        `[API] DAG pipeline queued with execution ID: ${executionId}`
+      );
 
       return ResponseHelper.success(
         res,
         {
           executionId,
           status: "queued",
-          message: "Pipeline execution queued successfully",
+          message: "Pipeline execution queued successfully (DAG mode)",
         },
         "Pipeline execution queued"
       );
