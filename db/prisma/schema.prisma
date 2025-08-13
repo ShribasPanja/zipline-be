@@ -61,3 +61,16 @@ model PipelineLog {
   @@index([runId])
   @@map("pipeline_logs")
 }
+
+model RepositorySecret {
+  id           String   @id @default(cuid())
+  repoFullName String // e.g., "owner/repo"
+  key          String // Secret name (e.g., "NPM_TOKEN")
+  value        String // Encrypted secret value
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@unique([repoFullName, key])
+  @@index([repoFullName])
+  @@map("repository_secrets")
+}

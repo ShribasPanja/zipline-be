@@ -2,13 +2,17 @@ import { PipelineLogRepository } from "../repositories/pipelineLog.repository";
 import { PipelineRunRepository } from "../repositories/pipelineRun.repository";
 import { DbService } from "./db.service";
 import SocketService from "./socket.service";
+import { SecretsService, DecryptedSecret } from "./secrets.service";
 
 export class PipelineLoggerService {
   private runId?: string;
   private socketService: SocketService;
+  private repoFullName?: string;
+  private secrets: DecryptedSecret[] = [];
 
-  constructor(private executionId: string) {
+  constructor(private executionId: string, repoFullName?: string) {
     this.socketService = SocketService.getInstance();
+    this.repoFullName = repoFullName;
   }
 
   async init() {
@@ -18,25 +22,43 @@ export class PipelineLoggerService {
 
     if (!DbService.isEnabled()) {
       console.log("[LOGGER] Database not enabled, using console logging only");
-      return;
+    } else {
+      try {
+        const run = await PipelineRunRepository.findByExecutionId(
+          this.executionId
+        );
+        if (run) {
+          this.runId = run.id;
+          this.repoFullName = run.repoFullName || run.repoName;
+          console.log(
+            `[LOGGER] Successfully initialized with run ID: ${this.runId}`
+          );
+        } else {
+          console.warn(
+            `[LOGGER] No pipeline run found for execution ID: ${this.executionId}`
+          );
+        }
+      } catch (error) {
+        console.warn("[LOGGER] Failed to initialize logger:", error);
+      }
     }
 
-    try {
-      const run = await PipelineRunRepository.findByExecutionId(
-        this.executionId
-      );
-      if (run) {
-        this.runId = run.id;
+    // Load secrets for sanitization
+    if (this.repoFullName) {
+      try {
+        this.secrets = await SecretsService.getSecretsForRepository(
+          this.repoFullName
+        );
         console.log(
-          `[LOGGER] Successfully initialized with run ID: ${this.runId}`
+          `[LOGGER] Loaded ${this.secrets.length} secrets for sanitization`
         );
-      } else {
+      } catch (error) {
         console.warn(
-          `[LOGGER] No pipeline run found for execution ID: ${this.executionId}`
+          "[LOGGER] Failed to load secrets for sanitization:",
+          error
         );
+        this.secrets = [];
       }
-    } catch (error) {
-      console.warn("[LOGGER] Failed to initialize logger:", error);
     }
   }
 
@@ -45,11 +67,17 @@ export class PipelineLoggerService {
     level: "info" | "warn" | "error" = "info",
     step?: string
   ) {
+    // Sanitize message to remove any secret values
+    const sanitizedMessage = SecretsService.sanitizeLogContent(
+      message,
+      this.secrets
+    );
+
     const logMessage = `[${level.toUpperCase()}] ${
       step ? `[${step}] ` : ""
-    }${message}`;
+    }${sanitizedMessage}`;
 
-    // Always log to console first
+    // Always log to console first (with sanitized content)
     console.log(logMessage);
 
     let savedLog: any = null;
@@ -62,7 +90,7 @@ export class PipelineLoggerService {
         savedLog = await PipelineLogRepository.create({
           runId: this.runId,
           level,
-          message,
+          message: sanitizedMessage, // Store sanitized message
           step,
         });
         console.log(
@@ -79,12 +107,12 @@ export class PipelineLoggerService {
       );
     }
 
-    // Emit real-time log via Socket.IO
+    // Emit real-time log via Socket.IO (with sanitized content)
     try {
       const logData = {
         id: savedLog?.id || `temp-${Date.now()}`,
         level,
-        message,
+        message: sanitizedMessage, // Emit sanitized message
         step,
         timestamp: new Date().toISOString(),
       };

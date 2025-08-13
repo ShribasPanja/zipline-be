@@ -6,6 +6,12 @@ const router = Router();
 // Get job status by execution ID
 router.get("/jobs/:executionId", QueueController.getJobStatus);
 
+// Cancel a running job by execution ID
+router.post("/jobs/:executionId/cancel", QueueController.cancelJob);
+
+// Rerun a pipeline by execution ID
+router.post("/jobs/:executionId/rerun", QueueController.rerunJob);
+
 // Get queue statistics
 router.get("/stats", QueueController.getQueueStats);
 

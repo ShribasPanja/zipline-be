@@ -1,4 +1,4 @@
-import { spawn, exec } from "child_process";
+import { spawn, exec, ChildProcess } from "child_process";
 import { promisify } from "util";
 import path from "path";
 
@@ -8,6 +8,7 @@ interface Step {
   name: string;
   image: string;
   run: string;
+  env?: string[]; // Environment variables for the step
 }
 
 interface StepResult {
@@ -17,6 +18,9 @@ interface StepResult {
   error?: string;
   duration: number;
 }
+
+// Track active Docker processes by execution ID
+const activeDockerProcesses = new Map<string, ChildProcess[]>();
 
 export class DockerExecutionService {
   static async validateDockerAvailability(): Promise<boolean> {
@@ -30,10 +34,73 @@ export class DockerExecutionService {
     }
   }
 
+  static killProcessesForExecution(executionId: string): number {
+    const processes = activeDockerProcesses.get(executionId);
+    if (!processes || processes.length === 0) {
+      console.log(
+        `[DOCKER_CANCEL] No active processes found for execution ${executionId}`
+      );
+      return 0;
+    }
+
+    let killedCount = 0;
+    for (const process of processes) {
+      try {
+        if (!process.killed) {
+          process.kill("SIGTERM");
+          killedCount++;
+          console.log(
+            `[DOCKER_CANCEL] Killed Docker process ${process.pid} for execution ${executionId}`
+          );
+        }
+      } catch (error) {
+        console.error(
+          `[DOCKER_CANCEL] Failed to kill process ${process.pid}:`,
+          error
+        );
+      }
+    }
+
+    // Clean up the tracking
+    activeDockerProcesses.delete(executionId);
+    console.log(
+      `[DOCKER_CANCEL] Killed ${killedCount} Docker processes for execution ${executionId}`
+    );
+    return killedCount;
+  }
+
+  static addProcessToTracking(
+    executionId: string,
+    process: ChildProcess
+  ): void {
+    if (!activeDockerProcesses.has(executionId)) {
+      activeDockerProcesses.set(executionId, []);
+    }
+    activeDockerProcesses.get(executionId)!.push(process);
+  }
+
+  static removeProcessFromTracking(
+    executionId: string,
+    process: ChildProcess
+  ): void {
+    const processes = activeDockerProcesses.get(executionId);
+    if (processes) {
+      const index = processes.indexOf(process);
+      if (index > -1) {
+        processes.splice(index, 1);
+      }
+      if (processes.length === 0) {
+        activeDockerProcesses.delete(executionId);
+      }
+    }
+  }
+
   static async executeStep(
     step: Step,
     workingDir: string,
-    onOutput?: (output: string, isError?: boolean) => void
+    onOutput?: (output: string, isError?: boolean) => void,
+    secretEnvVars?: string[],
+    executionId?: string
   ): Promise<StepResult> {
     const stepStartTime = Date.now();
     console.log(`[DOCKER] --- Executing Step: "${step.name}" ---`);
@@ -46,18 +113,34 @@ export class DockerExecutionService {
       }
 
       return new Promise<StepResult>((resolve, reject) => {
-        const args = [
-          "run",
-          "--rm",
-          "-v",
-          `${workingDir}:/app`,
-          "-w",
-          "/app",
+        const args = ["run", "--rm", "-v", `${workingDir}:/app`, "-w", "/app"];
+
+        // Add environment variables for secrets
+        if (secretEnvVars && secretEnvVars.length > 0) {
+          for (const envVar of secretEnvVars) {
+            args.push("-e", envVar);
+          }
+          console.log(
+            `[DOCKER] Injecting ${secretEnvVars.length} secret environment variables`
+          );
+        }
+
+        // Add step-specific environment variables
+        if (step.env && step.env.length > 0) {
+          for (const envVar of step.env) {
+            args.push("-e", envVar);
+          }
+          console.log(
+            `[DOCKER] Adding ${step.env.length} step environment variables`
+          );
+        }
+
+        args.push(
           step.image,
           "sh",
           "-c",
-          `set -e\n${step.run}`, // Add 'set -e' to exit on any command failure
-        ];
+          `set -e\n${step.run}` // Add 'set -e' to exit on any command failure
+        );
 
         console.log(
           `[DOCKER] Running: docker ${args
@@ -73,6 +156,11 @@ export class DockerExecutionService {
           cwd: workingDir,
           stdio: ["ignore", "pipe", "pipe"], // stdin ignored, stdout and stderr piped
         });
+
+        // Track the process for cancellation if executionId is provided
+        if (executionId) {
+          this.addProcessToTracking(executionId, dockerProcess);
+        }
 
         let stdout = "";
         let stderr = "";
@@ -102,6 +190,11 @@ export class DockerExecutionService {
             if (processCompleted) return;
             processCompleted = true;
 
+            // Remove from tracking
+            if (executionId) {
+              this.removeProcessFromTracking(executionId, dockerProcess);
+            }
+
             const stepDuration = Date.now() - stepStartTime;
             console.log(
               `[DOCKER] Process exited with code: ${code}, signal: ${signal}`
@@ -122,6 +215,14 @@ export class DockerExecutionService {
                 duration: stepDuration,
               });
             } else {
+              // Check if this was cancelled (SIGTERM usually means cancellation)
+              if (signal === "SIGTERM") {
+                console.log(`[DOCKER] Step "${step.name}" was cancelled`);
+                onOutput?.(`[DOCKER] Step "${step.name}" was cancelled`, true);
+                reject(new Error(`Step "${step.name}" was cancelled`));
+                return;
+              }
+
               // Step failed with non-zero exit code - REJECT the promise!
               const errorMessage =
                 stderr.trim() || `Process exited with code ${code}`;
@@ -149,6 +250,11 @@ export class DockerExecutionService {
         dockerProcess.on("close", (code: number | null) => {
           if (processCompleted) return;
           processCompleted = true;
+
+          // Remove from tracking
+          if (executionId) {
+            this.removeProcessFromTracking(executionId, dockerProcess);
+          }
 
           const stepDuration = Date.now() - stepStartTime;
 

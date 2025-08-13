@@ -4,6 +4,11 @@ export interface StepLike {
   image: string;
   run: string;
   needs?: string[];
+  artifacts?: {
+    paths: string[];
+    name?: string;
+    expire?: string;
+  };
 }
 
 export interface StepNode {

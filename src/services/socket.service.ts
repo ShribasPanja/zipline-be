@@ -95,14 +95,67 @@ export class SocketService {
     }
 
     const room = `pipeline-${executionId}`;
-    this.io
-      .to(room)
-      .emit("pipeline-status", {
-        status,
-        metadata,
-        timestamp: new Date().toISOString(),
-      });
+    this.io.to(room).emit("pipeline-status", {
+      status,
+      metadata,
+      timestamp: new Date().toISOString(),
+    });
     console.log(`[SOCKET] Emitted status to room ${room}: ${status}`);
+  }
+
+  // Emit step status update for live DAG visualization
+  public emitStepStatus(
+    executionId: string,
+    stepName: string,
+    status: "pending" | "running" | "success" | "failed",
+    metadata?: {
+      startTime?: string;
+      endTime?: string;
+      duration?: number;
+      error?: string;
+    }
+  ): void {
+    if (!this.io) {
+      console.warn(
+        "[SOCKET] Socket.IO not initialized, cannot emit step status"
+      );
+      return;
+    }
+
+    const room = `pipeline-${executionId}`;
+    this.io.to(room).emit("step-status", {
+      stepName,
+      status,
+      metadata,
+      timestamp: new Date().toISOString(),
+    });
+    console.log(
+      `[SOCKET] Emitted step status to room ${room}: ${stepName} -> ${status}`
+    );
+  }
+
+  // Emit DAG update for real-time visualization
+  public emitDAGUpdate(
+    executionId: string,
+    dagData: {
+      nodes: any[];
+      edges: any[];
+      stepStatuses: { [stepName: string]: any };
+    }
+  ): void {
+    if (!this.io) {
+      console.warn(
+        "[SOCKET] Socket.IO not initialized, cannot emit DAG update"
+      );
+      return;
+    }
+
+    const room = `pipeline-${executionId}`;
+    this.io.to(room).emit("dag-update", {
+      ...dagData,
+      timestamp: new Date().toISOString(),
+    });
+    console.log(`[SOCKET] Emitted DAG update to room ${room}`);
   }
 
   // Get Socket.IO instance

@@ -27,4 +27,7 @@ router.get("/status", PipelineController.getPipelineStatus);
 // POST /api/pipeline/cleanup - Cleanup old executions
 router.post("/cleanup", PipelineController.cleanupExecutions);
 
+// GET /api/pipeline/dag/:executionId - Get DAG visualization data
+router.get("/dag/:executionId", PipelineController.getDAGVisualization);
+
 export default router;

@@ -299,4 +299,306 @@ export class PipelineController {
       );
     }
   }
+
+  static async getDAGVisualization(req: Request, res: Response) {
+    try {
+      const { executionId } = req.params;
+
+      if (!executionId) {
+        return ResponseHelper.error(res, "Execution ID is required", 400);
+      }
+
+      // Get pipeline run info from database
+      const { PipelineRunRepository } = await import(
+        "../repositories/pipelineRun.repository"
+      );
+      const pipelineRun = await PipelineRunRepository.findByExecutionId(
+        executionId
+      );
+
+      if (!pipelineRun) {
+        return ResponseHelper.error(res, "Pipeline execution not found", 404);
+      }
+
+      // Clone repository and read actual pipeline.yml
+      let tempDir: string;
+      let pipelineSteps: any[] = [];
+
+      try {
+        console.log(
+          `[DAG] Cloning repository for DAG visualization: ${pipelineRun.repoUrl}`
+        );
+        const pipeRes = await PipelineHelper.executePipeline(
+          pipelineRun.repoUrl,
+          pipelineRun.repoName,
+          pipelineRun.branch || "main",
+          true // validate only, don't execute
+        );
+
+        if (!pipeRes.success || !pipeRes.tempDir) {
+          throw new Error(pipeRes.error || "Failed to clone repository");
+        }
+
+        tempDir = pipeRes.tempDir;
+        const yamlPath = require("path").join(tempDir, ".zipline/pipeline.yml");
+
+        if (!require("fs").existsSync(yamlPath)) {
+          throw new Error("Pipeline configuration not found in repository");
+        }
+
+        console.log(`[DAG] Reading pipeline.yml from: ${yamlPath}`);
+        const pipeline = await PipelineHelper.readYamlConfig(yamlPath);
+        pipelineSteps = pipeline.steps || [];
+
+        console.log(
+          `[DAG] Found ${pipelineSteps.length} steps in pipeline.yml`
+        );
+
+        // Cleanup temp directory after reading
+        setTimeout(() => {
+          try {
+            if (require("fs").existsSync(tempDir)) {
+              require("fs").rmSync(tempDir, { recursive: true, force: true });
+              console.log(`[DAG] Cleaned up temp directory: ${tempDir}`);
+            }
+          } catch (cleanupError) {
+            console.warn(
+              `[DAG] Failed to cleanup temp directory: ${cleanupError}`
+            );
+          }
+        }, 1000);
+      } catch (error: any) {
+        console.error(`[DAG] Error reading pipeline.yml:`, error);
+        return ResponseHelper.error(
+          res,
+          `Failed to read pipeline configuration: ${error.message}`,
+          500
+        );
+      }
+
+      if (!pipelineSteps || pipelineSteps.length === 0) {
+        return ResponseHelper.error(
+          res,
+          "No pipeline steps found in configuration",
+          404
+        );
+      }
+
+      // Transform to ReactFlow format using actual pipeline data
+      const dagData = PipelineController.transformToReactFlow(pipelineSteps);
+
+      const response = {
+        executionId,
+        repoName: pipelineRun.repoName,
+        branch: pipelineRun.branch || "main",
+        nodes: dagData.nodes,
+        edges: dagData.edges,
+        totalSteps: pipelineSteps.length,
+        pipelineConfig: {
+          steps: pipelineSteps.map((step) => ({
+            name: step.name,
+            image: step.image,
+            needs: step.needs || [],
+            run: step.run || [],
+          })),
+        },
+      };
+
+      return ResponseHelper.success(
+        res,
+        response,
+        "DAG visualization data retrieved successfully"
+      );
+    } catch (error: any) {
+      console.error("[API] Get DAG visualization failed:", error);
+      return ResponseHelper.error(
+        res,
+        error.message || "Internal server error",
+        500
+      );
+    }
+  }
+
+  private static transformToReactFlow(steps: any[]) {
+    // Create a dependency map for better layout calculation
+    const stepMap = new Map();
+    steps.forEach((step) => {
+      stepMap.set(step.name, step);
+    });
+
+    // Calculate levels (depth) for each step based on dependencies
+    const levelMap = new Map<string, number>();
+    const calculateLevel = (stepName: string, visited = new Set()): number => {
+      if (visited.has(stepName)) {
+        console.warn(
+          `[DAG] Circular dependency detected involving step: ${stepName}`
+        );
+        return 0; // Break circular dependency
+      }
+
+      if (levelMap.has(stepName)) {
+        return levelMap.get(stepName)!;
+      }
+
+      const step = stepMap.get(stepName);
+      if (!step || !step.needs || step.needs.length === 0) {
+        levelMap.set(stepName, 0);
+        return 0;
+      }
+
+      visited.add(stepName);
+      const maxDepLevel = Math.max(
+        ...step.needs.map((dep: string) =>
+          calculateLevel(dep, new Set(visited))
+        )
+      );
+      const level = maxDepLevel + 1;
+      levelMap.set(stepName, level);
+      visited.delete(stepName);
+      return level;
+    };
+
+    // Calculate levels for all steps
+    steps.forEach((step) => calculateLevel(step.name));
+
+    // Group steps by level for better positioning
+    const levelGroups = new Map<number, string[]>();
+    for (const [stepName, level] of levelMap.entries()) {
+      if (!levelGroups.has(level)) {
+        levelGroups.set(level, []);
+      }
+      levelGroups.get(level)!.push(stepName);
+    }
+
+    // Create nodes with improved positioning
+    const nodes = steps.map((step, index) => {
+      const level = levelMap.get(step.name) || 0;
+      const stepsAtLevel = levelGroups.get(level) || [];
+      const indexAtLevel = stepsAtLevel.indexOf(step.name);
+      const totalAtLevel = stepsAtLevel.length;
+
+      // Calculate position with better spacing
+      const xSpacing = 400; // Increased horizontal spacing between levels
+      const ySpacing = 250; // Increased vertical spacing between nodes
+      const yOffset =
+        totalAtLevel > 1
+          ? (indexAtLevel - (totalAtLevel - 1) / 2) * ySpacing
+          : 0;
+
+      // Determine node type based on dependencies
+      const dependencies = step.needs || [];
+      const isRoot = dependencies.length === 0;
+      const isLeaf = !steps.some((s) => s.needs && s.needs.includes(step.name));
+
+      let nodeColor = "#1f2937"; // default
+      let borderColor = "#374151"; // default
+      let textColor = "#10b981"; // green
+
+      if (isRoot) {
+        nodeColor = "#0f172a"; // darker for root nodes
+        borderColor = "#1e40af"; // blue border for starting nodes
+        textColor = "#3b82f6"; // blue text
+      } else if (isLeaf) {
+        nodeColor = "#1a1a1a"; // darker for leaf nodes
+        borderColor = "#dc2626"; // red border for final nodes
+        textColor = "#f87171"; // red text
+      }
+
+      return {
+        id: step.name,
+        type: "default",
+        position: {
+          x: level * xSpacing + 50,
+          y: yOffset + 100,
+        },
+        data: {
+          label: step.name,
+          image: step.image || "alpine:latest",
+          dependencies: dependencies,
+          commands: step.run || [],
+          isRoot,
+          isLeaf,
+          level,
+          description: step.description || "",
+        },
+        style: {
+          background: nodeColor,
+          color: textColor,
+          border: `2px solid ${borderColor}`,
+          borderRadius: "8px",
+          fontSize: "12px",
+          fontFamily: "monospace",
+          padding: "12px",
+          minWidth: "220px",
+          minHeight: "90px",
+          boxShadow: "0 4px 6px -1px rgba(0, 0, 0, 0.3)",
+        },
+      };
+    });
+
+    // Create edges with enhanced styling and labels
+    const edges: any[] = [];
+    steps.forEach((step) => {
+      const dependencies = step.needs || [];
+      dependencies.forEach((dep: string, index: number) => {
+        const sourceLevel = levelMap.get(dep) || 0;
+        const targetLevel = levelMap.get(step.name) || 0;
+        const isLongDistance = targetLevel - sourceLevel > 1;
+
+        edges.push({
+          id: `${dep}-${step.name}`,
+          source: dep,
+          target: step.name,
+          type: "smoothstep",
+          animated: true,
+          style: {
+            stroke: "#22c55e",
+            strokeWidth: 4,
+            strokeDasharray: isLongDistance ? "10,5" : "none",
+          },
+          markerEnd: {
+            type: "arrowclosed",
+            width: 20,
+            height: 20,
+            color: "#22c55e",
+          },
+          label: `dependency`,
+          labelStyle: {
+            fill: "#f3f4f6",
+            fontWeight: 600,
+            fontSize: 11,
+            fontFamily: "monospace",
+          },
+          labelBgStyle: {
+            fill: "#1f2937",
+            fillOpacity: 0.95,
+            rx: 6,
+            ry: 3,
+          },
+          labelBgPadding: [8, 12],
+          labelShowBg: true,
+        });
+      });
+    });
+
+    // Add flow statistics
+    const stats = {
+      totalSteps: steps.length,
+      maxLevel: Math.max(...Array.from(levelMap.values())),
+      rootSteps: steps.filter((s) => !s.needs || s.needs.length === 0).length,
+      leafSteps: steps.filter(
+        (s) =>
+          !steps.some((other) => other.needs && other.needs.includes(s.name))
+      ).length,
+      totalDependencies: edges.length,
+    };
+
+    console.log(
+      `[DAG] Generated flow: ${stats.totalSteps} steps, ${
+        stats.maxLevel + 1
+      } levels, ${stats.totalDependencies} dependencies`
+    );
+
+    return { nodes, edges, stats };
+  }
 }

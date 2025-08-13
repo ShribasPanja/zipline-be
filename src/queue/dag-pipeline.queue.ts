@@ -7,6 +7,8 @@ import {
 } from "../services/orchestrator.service";
 import { DockerExecutionService } from "../services/docker.service";
 import { PipelineLoggerService } from "../services/pipelineLogger.service";
+import { ArtifactService } from "../services/artifact.service";
+import { SecretsService } from "../services/secrets.service";
 import SocketService from "../services/socket.service";
 import { PipelineRunRepository } from "../repositories/pipelineRun.repository";
 import { ActivityService } from "../services/activity.service";
@@ -40,6 +42,7 @@ interface OrchestratorJobData {
 
 const activePlans = new Map<string, DAGExecutionPlan>();
 const activeSchedulers = new Map<string, { cleanup: () => void }>();
+const cancelledExecutions = new Set<string>();
 
 // Event-driven parallel scheduler for DAG execution
 function setupParallelScheduler(
@@ -187,14 +190,31 @@ export const dagOrchestratorQueue = new Queue<OrchestratorJobData>(
 export const dagStepWorker = new Worker<StepJobData>(
   "dag-step",
   async (job: Job<StepJobData>) => {
-    const { executionId, stepName, step, workingDir, repoName } = job.data;
-    const logger = new PipelineLoggerService(executionId);
+    const { executionId, stepName, step, workingDir, repoName, repository } =
+      job.data;
+    const repoFullName = repository.full_name;
+    const logger = new PipelineLoggerService(executionId, repoFullName);
     await logger.init();
     const socket = SocketService.getInstance();
+    const artifactService = new ArtifactService();
+
+    // Check if execution is cancelled before starting
+    if (isExecutionCancelled(executionId)) {
+      await logger.warn(
+        `Step "${stepName}" skipped - execution cancelled`,
+        stepName
+      );
+      throw new Error(`Execution ${executionId} was cancelled`);
+    }
 
     const plan = activePlans.get(executionId);
     if (plan) PipelineOrchestrator.updateStepStatus(plan, stepName, "running");
     await logger.info(`--- Executing step: ${stepName} ---`, "DAG_STEP");
+
+    // Emit step status for live DAG visualization
+    socket.emitStepStatus(executionId, stepName, "running", {
+      startTime: new Date().toISOString(),
+    });
 
     // Real-time output handler for live logs to frontend (like sequential pipeline)
     const onDockerOutput = async (output: string, isError: boolean = false) => {
@@ -209,14 +229,46 @@ export const dagStepWorker = new Worker<StepJobData>(
     };
 
     try {
+      // Fetch secrets for the repository
+      let secretEnvVars: string[] = [];
+      try {
+        secretEnvVars = await SecretsService.getDockerEnvVarsForRepository(
+          repoFullName
+        );
+        if (secretEnvVars.length > 0) {
+          await logger.info(
+            `Loaded ${secretEnvVars.length} secrets for step "${stepName}"`,
+            stepName
+          );
+        }
+      } catch (secretError: any) {
+        await logger.warn(
+          `Failed to load secrets for step "${stepName}": ${secretError.message}`,
+          stepName
+        );
+        // Continue execution without secrets
+      }
+
       await logger.info(
         `Starting Docker execution for step "${stepName}" with image ${step.image}`,
         stepName
       );
+
+      // Check for cancellation again before starting Docker execution
+      if (isExecutionCancelled(executionId)) {
+        await logger.warn(
+          `Step "${stepName}" cancelled before Docker execution`,
+          stepName
+        );
+        throw new Error(`Execution ${executionId} was cancelled`);
+      }
+
       const result = await DockerExecutionService.executeStep(
         step as any,
         workingDir,
-        onDockerOutput
+        onDockerOutput,
+        secretEnvVars, // Pass secrets as environment variables
+        executionId // Pass execution ID for process tracking
       );
       await logger.info(
         `Step "${stepName}" completed successfully in ${result.duration}ms`,
@@ -226,6 +278,77 @@ export const dagStepWorker = new Worker<StepJobData>(
       if (plan) {
         // Mark as completed; the orchestrator loop will schedule any newly-ready steps
         PipelineOrchestrator.updateStepStatus(plan, stepName, "completed");
+
+        // Save artifacts if step is successful and has artifact configuration
+        await logger.info(
+          `Checking artifacts for step "${stepName}": ${JSON.stringify(
+            step.artifacts
+          )}`,
+          stepName
+        );
+
+        if (
+          step.artifacts &&
+          step.artifacts.paths &&
+          step.artifacts.paths.length > 0
+        ) {
+          try {
+            await logger.info(
+              `Saving artifacts for step "${stepName}": ${step.artifacts.paths.join(
+                ", "
+              )}`,
+              stepName
+            );
+
+            const artifactResults = await artifactService.saveArtifacts(
+              executionId,
+              stepName,
+              workingDir,
+              step.artifacts,
+              true // step is successful
+            );
+
+            const successfulArtifacts = artifactResults.filter(
+              (r) => r.success
+            );
+            const failedArtifacts = artifactResults.filter((r) => !r.success);
+
+            if (successfulArtifacts.length > 0) {
+              await logger.info(
+                `Successfully saved ${successfulArtifacts.length} artifacts for step "${stepName}"`,
+                stepName
+              );
+            }
+
+            if (failedArtifacts.length > 0) {
+              await logger.warn(
+                `Failed to save ${
+                  failedArtifacts.length
+                } artifacts for step "${stepName}": ${failedArtifacts
+                  .map((f) => f.error)
+                  .join(", ")}`,
+                stepName
+              );
+            }
+          } catch (artifactError: any) {
+            await logger.error(
+              `Failed to save artifacts for step "${stepName}": ${artifactError.message}`,
+              stepName
+            );
+            // Don't fail the step just because artifact saving failed
+          }
+        } else {
+          await logger.info(
+            `No artifacts configured for step "${stepName}"`,
+            stepName
+          );
+        }
+
+        // Emit step completion status for live DAG visualization
+        socket.emitStepStatus(executionId, stepName, "success", {
+          endTime: new Date().toISOString(),
+          duration: result.duration,
+        });
       }
       return { success: true };
     } catch (e: any) {
@@ -238,6 +361,13 @@ export const dagStepWorker = new Worker<StepJobData>(
           "failed",
           e.message
         );
+
+        // Emit step failure status for live DAG visualization
+        socket.emitStepStatus(executionId, stepName, "failed", {
+          endTime: new Date().toISOString(),
+          error: e.message,
+        });
+
         socket.emitPipelineStatus(executionId, "failed", {
           failedStep: stepName,
           error: e.message,
@@ -253,7 +383,7 @@ export const dagOrchestratorWorker = new Worker<OrchestratorJobData>(
   "dag-orchestrator",
   async (job: Job<OrchestratorJobData>) => {
     const { repoUrl, repoName, branch, executionId, repository } = job.data;
-    const logger = new PipelineLoggerService(executionId);
+    const logger = new PipelineLoggerService(executionId, repository.full_name);
     await logger.init();
     const socket = SocketService.getInstance();
 
@@ -484,6 +614,11 @@ async function finalize(
     mode: "DAG",
   });
 
+  await logger.info(
+    `Final pipeline status emitted: ${ok ? "success" : "failed"}`,
+    "DAG_ORCHESTRATOR"
+  );
+
   // Log completion activity
   ActivityService.addActivity({
     type: "pipeline_execution",
@@ -521,10 +656,6 @@ async function finalize(
   }
 
   await logger.info("DAG pipeline execution completed", "COMPLETE");
-  socket.emitPipelineStatus(executionId, "running", {
-    step: "complete",
-    progress: 100,
-  });
 
   // Clean up active plans and schedulers
   activePlans.delete(executionId);
@@ -596,4 +727,34 @@ export async function addDAGPipelineJob(
     jobId: String(job.id),
   }).catch(() => {});
   return executionId;
+}
+
+// Cancellation management functions
+export function cancelDAGExecution(executionId: string): void {
+  console.log(`[DAG_CANCEL] Marking execution ${executionId} for cancellation`);
+  cancelledExecutions.add(executionId);
+
+  // Kill any active Docker processes for this execution
+  const killedProcesses =
+    DockerExecutionService.killProcessesForExecution(executionId);
+  console.log(
+    `[DAG_CANCEL] Killed ${killedProcesses} Docker processes for execution ${executionId}`
+  );
+
+  // Clean up active plans and schedulers
+  const scheduler = activeSchedulers.get(executionId);
+  if (scheduler) {
+    scheduler.cleanup();
+    activeSchedulers.delete(executionId);
+  }
+
+  activePlans.delete(executionId);
+}
+
+export function isExecutionCancelled(executionId: string): boolean {
+  return cancelledExecutions.has(executionId);
+}
+
+export function cleanupCancelledExecution(executionId: string): void {
+  cancelledExecutions.delete(executionId);
 }

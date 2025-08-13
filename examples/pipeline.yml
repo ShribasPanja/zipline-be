@@ -12,18 +12,36 @@ steps:
   - name: "Run Tests"
     image: "node:18-alpine"
     run: "npm test"
+    artifacts:
+      paths:
+        - "coverage/"
+        - "test-results.xml"
+      name: "test-reports"
 
   - name: "Build Application"
     image: "node:18-alpine"
     run: "npm run build"
+    artifacts:
+      paths:
+        - "dist/"
+        - "build/"
+      name: "build-output"
 
   - name: "Security Scan"
     image: "node:18-alpine"
     run: "npm audit --audit-level=moderate"
+    artifacts:
+      paths:
+        - "security-report.json"
+      name: "security-scan"
 
   - name: "Lint Code"
     image: "node:18-alpine"
     run: "npm run lint"
+    artifacts:
+      paths:
+        - "lint-results.xml"
+      name: "lint-report"
 # Alternative example for Python projects:
 # steps:
 #   - name: "Install Dependencies"

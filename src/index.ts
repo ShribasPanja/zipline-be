@@ -1,9 +1,28 @@
 import App from "./app";
 import "./queue/dag-pipeline.queue"; // Initialize DAG workers only
+import { ArtifactService } from "./services/artifact.service";
+
+// Initialize artifact service
+async function initializeServices() {
+  try {
+    const artifactService = new ArtifactService();
+    await artifactService.initializeBucket();
+    console.log("[INFO] Artifact service initialized successfully");
+  } catch (error: any) {
+    console.error(
+      "[ERROR] Failed to initialize artifact service:",
+      error.message
+    );
+    // Don't exit, continue without artifact service
+  }
+}
 
 // Start the application
 const app = new App();
 app.listen();
+
+// Initialize services after app starts
+initializeServices();
 
 // Graceful shutdown for DAG workers
 process.on("SIGTERM", async () => {
