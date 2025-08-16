@@ -20,17 +20,13 @@
 
 ---
 
-## 🎥 Live Demo
+<!-- ## 🎥 Live Demo
 
-<p align="center">
-  <video src="./assets/demo.mp4" controls width="600">
-    Your browser does not support the video tag.
-  </video>
-</p>
+![Live Demo of Zipline in Action](./assets/demo.mp4)
 
 *Demo: Live DAG visualization, real-time log streaming, and pipeline status updates in action.*
 
----
+--- -->
 
 ## 📸 Screenshots
 
@@ -55,7 +51,6 @@
 * **Isolated Runtimes:** Every step runs inside a fresh, isolated Docker container, ensuring a clean, secure, and reproducible build environment.
 * **Build Artifacts:** Supports saving build artifacts to an S3-compatible object store (MinIO), allowing you to store and retrieve the outputs of your pipelines.
 * **Secrets Management:** Securely manages sensitive information like API keys and tokens. Secrets are encrypted at rest and injected into pipeline steps as environment variables, with automatic masking in logs.
-* **Dependency Caching:** Accelerates build times by caching dependencies (like `node_modules`) between runs, reducing redundant downloads.
 * **Branch-Specific Workflows:** Configure pipelines to run only on specific branches (e.g., `main`, `release/*`), enabling protected deployment workflows.
 
 ### Developer Experience
@@ -70,8 +65,8 @@
 
 Zipline is built on a microservices architecture to ensure scalability and separation of concerns. The services communicate asynchronously via a distributed job queue (BullMQ on Redis), creating a resilient, event-driven system.
 
-**[Insert Your Architecture Diagram Here]**
-*(A diagram showing the API Gateway, Orchestrator, Runners, Database, Redis, and MinIO would be very effective here.)*
+<!-- **[Insert Your Architecture Diagram Here]**
+*(A diagram showing the API Gateway, Orchestrator, Runners, Database, Redis, and MinIO would be very effective here.)* -->
 
 ### Key Services
 
