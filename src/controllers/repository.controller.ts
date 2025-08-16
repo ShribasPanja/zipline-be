@@ -20,7 +20,7 @@ export class RepositoryController {
         return;
       }
 
-      const token = authHeader.substring(7); // Remove 'Bearer ' prefix
+      const token = authHeader.substring(7);
 
       const repositories = await GitHubService.getUserRepositories(token);
       ResponseHelper.success(
@@ -39,7 +39,7 @@ export class RepositoryController {
     next: NextFunction
   ): Promise<void> {
     try {
-      const { repoFullName } = req.body; // e.g., "my-username/my-awesome-app"
+      const { repoFullName } = req.body;
       const authHeader = req.headers.authorization;
 
       if (!authHeader || !authHeader.startsWith("Bearer ")) {
@@ -51,7 +51,7 @@ export class RepositoryController {
         return;
       }
 
-      const token = authHeader.substring(7); // Remove 'Bearer ' prefix
+      const token = authHeader.substring(7);
 
       if (!repoFullName) {
         ResponseHelper.error(res, "Repository name is required", 400);
@@ -86,13 +86,11 @@ export class RepositoryController {
         return;
       }
 
-      const token = authHeader.substring(7); // Remove 'Bearer ' prefix
+      const token = authHeader.substring(7);
 
-      // Check if specific repository is requested
       const { repoFullName } = req.query;
 
       if (repoFullName && typeof repoFullName === "string") {
-        // Check single repository
         const hasWebhook = await GitHubService.checkWebhookExists(
           token,
           repoFullName
@@ -103,14 +101,12 @@ export class RepositoryController {
           `Webhook status checked for ${repoFullName}`
         );
       } else {
-        // Get repositories from query params (comma-separated) or fetch all user repos
         const repoNamesParam = req.query.repositories as string;
         let repoNames: string[] = [];
 
         if (repoNamesParam) {
           repoNames = repoNamesParam.split(",").map((name) => name.trim());
         } else {
-          // If no specific repos requested, get all user repositories
           const repositories = await GitHubService.getUserRepositories(token);
           repoNames = repositories.map((repo) => repo.full_name);
         }

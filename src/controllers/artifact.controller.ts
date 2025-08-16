@@ -90,9 +90,6 @@ export class ArtifactController {
     try {
       const { limit = 50, offset = 0 } = req.query;
 
-      // For now, we'll just return a placeholder response
-      // In a real implementation, you'd query your database for executions
-      // and then list artifacts for each one
 
       return ResponseHelper.success(
         res,

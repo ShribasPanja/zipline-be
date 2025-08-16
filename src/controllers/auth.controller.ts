@@ -33,14 +33,9 @@ export class AuthController {
         return;
       }
 
-      // Exchange code for access token
       const accessToken = await GitHubService.exchangeCodeForToken(code);
 
-      // Optional: Fetch user info and save to database
-      // const userInfo = await GitHubService.getUserInfo(accessToken);
 
-      // Redirect to frontend with token
-      // In production, consider using secure HTTP-only cookies instead
       ResponseHelper.redirect(
         res,
         `${config.frontend.url}/dashboard?token=${accessToken}`

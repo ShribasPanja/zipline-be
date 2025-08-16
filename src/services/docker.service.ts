@@ -8,7 +8,7 @@ interface Step {
   name: string;
   image: string;
   run: string;
-  env?: string[]; // Environment variables for the step
+  env?: string[];
 }
 
 interface StepResult {
@@ -19,7 +19,6 @@ interface StepResult {
   duration: number;
 }
 
-// Track active Docker processes by execution ID
 const activeDockerProcesses = new Map<string, ChildProcess[]>();
 
 export class DockerExecutionService {
@@ -61,7 +60,6 @@ export class DockerExecutionService {
       }
     }
 
-    // Clean up the tracking
     activeDockerProcesses.delete(executionId);
     console.log(
       `[DOCKER_CANCEL] Killed ${killedCount} Docker processes for execution ${executionId}`
@@ -106,7 +104,6 @@ export class DockerExecutionService {
     console.log(`[DOCKER] --- Executing Step: "${step.name}" ---`);
 
     try {
-      // Check if Docker is available
       const dockerAvailable = await this.validateDockerAvailability();
       if (!dockerAvailable) {
         throw new Error("Docker is not available on the system");
@@ -115,7 +112,6 @@ export class DockerExecutionService {
       return new Promise<StepResult>((resolve, reject) => {
         const args = ["run", "--rm", "-v", `${workingDir}:/app`, "-w", "/app"];
 
-        // Add environment variables for secrets
         if (secretEnvVars && secretEnvVars.length > 0) {
           for (const envVar of secretEnvVars) {
             args.push("-e", envVar);
@@ -125,7 +121,6 @@ export class DockerExecutionService {
           );
         }
 
-        // Add step-specific environment variables
         if (step.env && step.env.length > 0) {
           for (const envVar of step.env) {
             args.push("-e", envVar);
@@ -139,7 +134,7 @@ export class DockerExecutionService {
           step.image,
           "sh",
           "-c",
-          `set -e\n${step.run}` // Add 'set -e' to exit on any command failure
+          `set -e\n${step.run}`
         );
 
         console.log(
@@ -154,10 +149,9 @@ export class DockerExecutionService {
 
         const dockerProcess = spawn("docker", args, {
           cwd: workingDir,
-          stdio: ["ignore", "pipe", "pipe"], // stdin ignored, stdout and stderr piped
+          stdio: ["ignore", "pipe", "pipe"],
         });
 
-        // Track the process for cancellation if executionId is provided
         if (executionId) {
           this.addProcessToTracking(executionId, dockerProcess);
         }
@@ -165,7 +159,6 @@ export class DockerExecutionService {
         let stdout = "";
         let stderr = "";
 
-        // Handle stdout stream
         dockerProcess.stdout?.on("data", (data: Buffer) => {
           const output = data.toString();
           stdout += output;
@@ -173,7 +166,6 @@ export class DockerExecutionService {
           onOutput?.(output, false);
         });
 
-        // Handle stderr stream
         dockerProcess.stderr?.on("data", (data: Buffer) => {
           const output = data.toString();
           stderr += output;
@@ -181,16 +173,14 @@ export class DockerExecutionService {
           onOutput?.(output, true);
         });
 
-        let processCompleted = false; // Prevent multiple resolutions
+        let processCompleted = false;
 
-        // Handle process exit
         dockerProcess.on(
           "exit",
           (code: number | null, signal: string | null) => {
             if (processCompleted) return;
             processCompleted = true;
 
-            // Remove from tracking
             if (executionId) {
               this.removeProcessFromTracking(executionId, dockerProcess);
             }
@@ -215,7 +205,6 @@ export class DockerExecutionService {
                 duration: stepDuration,
               });
             } else {
-              // Check if this was cancelled (SIGTERM usually means cancellation)
               if (signal === "SIGTERM") {
                 console.log(`[DOCKER] Step "${step.name}" was cancelled`);
                 onOutput?.(`[DOCKER] Step "${step.name}" was cancelled`, true);
@@ -223,7 +212,6 @@ export class DockerExecutionService {
                 return;
               }
 
-              // Step failed with non-zero exit code - REJECT the promise!
               const errorMessage =
                 stderr.trim() || `Process exited with code ${code}`;
               console.error(
@@ -236,7 +224,6 @@ export class DockerExecutionService {
               );
               onOutput?.(`[DOCKER] Error: ${errorMessage}`, true);
 
-              // REJECT the promise to stop pipeline execution
               reject(
                 new Error(
                   `Step "${step.name}" failed with exit code ${code}: ${errorMessage}`
@@ -246,12 +233,10 @@ export class DockerExecutionService {
           }
         );
 
-        // Handle process completion (backup in case exit doesn't fire)
         dockerProcess.on("close", (code: number | null) => {
           if (processCompleted) return;
           processCompleted = true;
 
-          // Remove from tracking
           if (executionId) {
             this.removeProcessFromTracking(executionId, dockerProcess);
           }
@@ -275,7 +260,6 @@ export class DockerExecutionService {
               duration: stepDuration,
             });
           } else {
-            // Step failed with non-zero exit code - REJECT the promise!
             const errorMessage =
               stderr.trim() || `Process exited with code ${code}`;
             console.error(
@@ -288,7 +272,6 @@ export class DockerExecutionService {
             );
             onOutput?.(`[DOCKER] Error: ${errorMessage}`, true);
 
-            // REJECT the promise to stop pipeline execution
             reject(
               new Error(
                 `Step "${step.name}" failed with exit code ${code}: ${errorMessage}`
@@ -297,7 +280,6 @@ export class DockerExecutionService {
           }
         });
 
-        // Handle process errors
         dockerProcess.on("error", (error: Error) => {
           if (processCompleted) return;
           processCompleted = true;
@@ -309,13 +291,11 @@ export class DockerExecutionService {
           );
           onOutput?.(`[DOCKER] Process error: ${error.message}`, true);
 
-          // REJECT the promise for process errors
           reject(
             new Error(`Failed to start step "${step.name}": ${error.message}`)
           );
         });
 
-        // Set a timeout for the process (5 minutes)
         const timeout = setTimeout(() => {
           console.warn(
             `[DOCKER] Step "${step.name}" timed out, killing process`
@@ -323,15 +303,13 @@ export class DockerExecutionService {
           onOutput?.(`[DOCKER] Step "${step.name}" timed out`, true);
           dockerProcess.kill("SIGTERM");
 
-          // Force kill after 10 seconds if still running
           setTimeout(() => {
             if (!dockerProcess.killed) {
               dockerProcess.kill("SIGKILL");
             }
           }, 10000);
-        }, 300000); // 5 minutes
+        }, 300000);
 
-        // Clear timeout when process completes
         dockerProcess.on("close", () => {
           clearTimeout(timeout);
         });
@@ -357,7 +335,7 @@ export class DockerExecutionService {
     steps: Step[],
     workingDir: string,
     onOutput?: (output: string, isError?: boolean) => void,
-    executionId?: string // Add executionId for database updates
+    executionId?: string
   ): Promise<{
     success: boolean;
     steps: StepResult[];
@@ -383,7 +361,6 @@ export class DockerExecutionService {
 
         try {
           const result = await this.executeStep(step, workingDir, onOutput);
-          // If we reach here, the step succeeded (no rejection)
           results.push(result);
 
           console.log(`[DOCKER] Step "${step.name}" completed successfully`);
@@ -393,7 +370,6 @@ export class DockerExecutionService {
             false
           );
         } catch (stepError: any) {
-          // Handle step failures (rejected promises)
           const stepResult: StepResult = {
             name: step.name,
             success: false,
@@ -406,7 +382,6 @@ export class DockerExecutionService {
           console.error(`[FATAL] Pipeline execution stopped: ${errorMessage}`);
           onOutput?.(errorMessage, true);
 
-          // Update database with failure
           if (executionId) {
             try {
               const { PipelineRunRepository } = await import(
@@ -425,7 +400,6 @@ export class DockerExecutionService {
             }
           }
 
-          // Re-throw to stop pipeline
           throw new Error(errorMessage);
         }
       }
@@ -443,7 +417,6 @@ export class DockerExecutionService {
         steps: results,
       };
     } catch (pipelineError: any) {
-      // Top-level pipeline error handling
       console.error(
         `[DOCKER] Pipeline execution failed: ${pipelineError.message}`
       );

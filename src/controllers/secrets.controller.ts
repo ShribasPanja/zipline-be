@@ -95,7 +95,6 @@ export class SecretsController {
         return res.status(400).json({ error: "Secrets must be an array" });
       }
 
-      // Validate all secrets before saving any
       for (const secret of secrets) {
         if (!secret.key || !secret.value) {
           return res

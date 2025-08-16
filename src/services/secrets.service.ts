@@ -47,7 +47,6 @@ export class SecretsService {
   ): Promise<RepositorySecret> {
     const encryptedValue = this.encrypt(value);
 
-    // Check if secret already exists
     const existingSecret = await prisma.repositorySecret.findFirst({
       where: {
         repoFullName,
@@ -56,7 +55,6 @@ export class SecretsService {
     });
 
     if (existingSecret) {
-      // Update existing secret
       const updated = await prisma.repositorySecret.update({
         where: { id: existingSecret.id },
         data: {
@@ -68,12 +66,11 @@ export class SecretsService {
         id: updated.id,
         repoFullName: updated.repoFullName,
         key: updated.key,
-        value: value, // Return decrypted value
+        value: value,
         createdAt: updated.createdAt,
         updatedAt: updated.updatedAt,
       };
     } else {
-      // Create new secret
       const created = await prisma.repositorySecret.create({
         data: {
           repoFullName,
@@ -85,7 +82,7 @@ export class SecretsService {
         id: created.id,
         repoFullName: created.repoFullName,
         key: created.key,
-        value: value, // Return decrypted value
+        value: value,
         createdAt: created.createdAt,
         updatedAt: created.updatedAt,
       };
@@ -167,8 +164,6 @@ export class SecretsService {
 
     for (const secret of secrets) {
       if (secret.value && secret.value.length > 0) {
-        // Replace the secret value with the placeholder
-        // Use global replace to catch all occurrences
         const regex = new RegExp(this.escapeRegExp(secret.value), "g");
         sanitized = sanitized.replace(regex, this.SECRET_PLACEHOLDER);
       }

@@ -3,6 +3,7 @@ import { parse } from "yaml";
 import path from "path";
 import { simpleGit } from "simple-git";
 import { existsSync } from "fs";
+import micromatch from "micromatch";
 
 interface Step {
   name: string;
@@ -14,13 +15,18 @@ interface Pipeline {
   name?: string;
   description?: string;
   steps: Step[];
+  on?: {
+    push?: {
+      branches?: string[];
+    };
+  };
 }
 
 interface PipelineResult {
   success: boolean;
   error?: string;
   duration: number;
-  tempDir?: string; // Add temp directory to result
+  tempDir?: string;
   steps: {
     name: string;
     success: boolean;
@@ -63,6 +69,36 @@ export class PipelineHelper {
     return cleanUrl;
   }
 
+  static validateBranchAccess(pipeline: Pipeline, branchName: string): boolean {
+    if (!pipeline.on || !pipeline.on.push || !pipeline.on.push.branches) {
+      console.log(
+        `[PIPELINE] No branch restrictions found, allowing execution for branch: ${branchName}`
+      );
+      return true;
+    }
+
+    const allowedBranches = pipeline.on.push.branches;
+    console.log(
+      `[PIPELINE] Checking branch '${branchName}' against allowed patterns: ${allowedBranches.join(
+        ", "
+      )}`
+    );
+
+    const isAllowed = micromatch.isMatch(branchName, allowedBranches);
+
+    if (isAllowed) {
+      console.log(
+        `[PIPELINE] Branch '${branchName}' is allowed to trigger pipeline`
+      );
+    } else {
+      console.log(
+        `[PIPELINE] Branch '${branchName}' is NOT allowed to trigger pipeline`
+      );
+    }
+
+    return isAllowed;
+  }
+
   static async executePipeline(
     repoUrl: string,
     repoName: string,
@@ -81,10 +117,8 @@ export class PipelineHelper {
     };
 
     try {
-      // Ensure temp directory parent exists
       await mkdir(path.dirname(tempDir), { recursive: true });
 
-      // Clone the repository
       const gitInstance = simpleGit({
         baseDir: path.dirname(tempDir),
         binary: "git",
@@ -99,13 +133,11 @@ export class PipelineHelper {
 
       await gitInstance.clone(normalizedUrl, tempDir, cloneOptions);
 
-      // Verify clone success
       const clonedFiles = await readdir(tempDir);
       if (clonedFiles.length === 0) {
         throw new Error("Repository cloned but appears to be empty");
       }
 
-      // Read and validate pipeline configuration
       const yamlPath = path.join(tempDir, ".zipline/pipeline.yml");
       if (!existsSync(yamlPath)) {
         throw new Error(
@@ -116,6 +148,13 @@ export class PipelineHelper {
       const pipeline = (await this.readYamlConfig(yamlPath)) as Pipeline;
       if (!pipeline.steps || pipeline.steps.length === 0) {
         throw new Error("No steps defined in pipeline configuration");
+      }
+
+      if (branch && !this.validateBranchAccess(pipeline, branch)) {
+        throw new Error(
+          `Branch '${branch}' is not allowed to trigger this pipeline. ` +
+            `Check the 'on.push.branches' configuration in your pipeline.yml`
+        );
       }
 
       result.success = true;

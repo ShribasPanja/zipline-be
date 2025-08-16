@@ -15,7 +15,6 @@ export interface PipelineExecution {
 export class PipelineService {
   private static executions: Map<string, PipelineExecution> = new Map();
 
-  // All pipeline executions now use DAG mode (parallel-capable)
   static async executePipelineAsync(
     repoUrl: string,
     repoName: string,
@@ -23,7 +22,6 @@ export class PipelineService {
     repository?: { name: string; full_name: string },
     triggerCommit?: { id: string; message: string }
   ): Promise<string> {
-    // Route to DAG execution (supports both parallel and sequential steps)
     return this.executePipelineDAG(
       repoUrl,
       repoName,
@@ -33,7 +31,6 @@ export class PipelineService {
     );
   }
 
-  // DAG execution (handles both parallel dependencies and sequential steps)
   static async executePipelineDAG(
     repoUrl: string,
     repoName: string,
@@ -75,8 +72,6 @@ export class PipelineService {
     const localExecution = this.executions.get(executionId);
 
     if (localExecution) {
-      // For DAG executions, status is managed internally
-      // TODO: Could add DAG job status checking if needed
       console.log(
         `[PIPELINE_SERVICE] Retrieved execution status for ${executionId}: ${localExecution.status}`
       );

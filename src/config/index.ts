@@ -20,7 +20,6 @@ export const config = {
   },
 };
 
-// Validate required environment variables
 const requiredEnvVars = ["GITHUB_CLIENT_ID", "GITHUB_CLIENT_SECRET"];
 for (const envVar of requiredEnvVars) {
   if (!process.env[envVar]) {
