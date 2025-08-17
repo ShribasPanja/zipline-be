@@ -1,5 +1,12 @@
 import { DbService } from "../services/db.service";
-import { PipelineStatus, Prisma } from "@prisma/client";
+import { Prisma } from "@prisma/client";
+
+// Local enum type matching Prisma schema to avoid missing generated types
+export type PipelineStatusLocal =
+  | "QUEUED"
+  | "IN_PROGRESS"
+  | "SUCCESS"
+  | "FAILED";
 
 export type CreatePipelineRunInput = {
   executionId: string;
@@ -8,7 +15,7 @@ export type CreatePipelineRunInput = {
   repoFullName?: string;
   repoUrl: string;
   branch?: string;
-  status?: PipelineStatus;
+  status?: PipelineStatusLocal;
   triggerCommitId?: string;
   triggerMessage?: string;
   triggerAuthorName?: string;
@@ -17,7 +24,7 @@ export type CreatePipelineRunInput = {
 };
 
 export type UpdatePipelineRunInput = {
-  status?: PipelineStatus;
+  status?: PipelineStatusLocal;
   jobId?: string;
   startedAt?: Date | null;
   finishedAt?: Date | null;
@@ -93,7 +100,7 @@ export const PipelineRunRepository = {
     const prisma = DbService.getClient();
     if (!prisma) return [];
     try {
-      const where: Prisma.PipelineRunWhereInput = {};
+      const where: Prisma.PipelineRunWhereInput = {} as any;
       if (params?.repoName) where.repoName = params.repoName;
       return await prisma.pipelineRun.findMany({
         where,

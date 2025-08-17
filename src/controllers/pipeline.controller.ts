@@ -139,7 +139,7 @@ export class PipelineController {
           triggerAuthorEmail: pipelineRun.triggerAuthorEmail,
           startedAt: pipelineRun.queuedAt,
           completedAt: pipelineRun.finishedAt,
-          logs: logs.map((log) => ({
+          logs: logs.map((log: any) => ({
             id: log.id,
             timestamp: log.timestamp,
             level: log.level,
@@ -175,11 +175,13 @@ export class PipelineController {
       // Calculate basic stats
       const total = executions.length;
       const successful = executions.filter(
-        (e) => e.status === "SUCCESS"
+        (e: any) => e.status === "SUCCESS"
       ).length;
-      const failed = executions.filter((e) => e.status === "FAILED").length;
+      const failed = executions.filter(
+        (e: any) => e.status === "FAILED"
+      ).length;
       const inProgress = executions.filter(
-        (e) => e.status === "IN_PROGRESS"
+        (e: any) => e.status === "IN_PROGRESS"
       ).length;
 
       const stats = {
@@ -193,7 +195,7 @@ export class PipelineController {
       return ResponseHelper.success(
         res,
         {
-          executions: executions.map((exec) => ({
+          executions: executions.map((exec: any) => ({
             id: exec.id,
             executionId: exec.executionId,
             repoName: exec.repoName,

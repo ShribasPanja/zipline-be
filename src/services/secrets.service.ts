@@ -100,7 +100,7 @@ export class SecretsService {
       orderBy: { key: "asc" },
     });
 
-    return secrets.map((secret) => ({
+    return secrets.map((secret: any) => ({
       key: secret.key,
       value: this.decrypt(secret.value),
     }));
