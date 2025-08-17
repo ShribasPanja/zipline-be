@@ -17,6 +17,7 @@ export class ActivityController {
         offset: req.query.offset ? parseInt(req.query.offset as string) : 0,
       };
 
+      // Remove undefined values
       Object.keys(filter).forEach((key) => {
         if (filter[key as keyof ActivityFilter] === undefined) {
           delete filter[key as keyof ActivityFilter];

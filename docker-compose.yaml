@@ -8,31 +8,19 @@ services:
       - "6379:6379"
     volumes:
       - redis_data:/data
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 30s
 
   minio:
     image: minio/minio:latest
     restart: always
     ports:
-      - "9000:9000"
-      - "9001:9001"
+      - "9000:9000"  # API Port
+      - "9001:9001"  # Web Console Port
     environment:
       - MINIO_ROOT_USER=admin
       - MINIO_ROOT_PASSWORD=StrongPass123
     command: server /data --console-address ":9001"
     volumes:
       - minio_data:/data
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
-      interval: 30s
-      timeout: 20s
-      retries: 3
-      start_period: 30s
 
   backend:
     build:
@@ -42,10 +30,8 @@ services:
     ports:
       - "3001:3001"
     depends_on:
-      redis:
-        condition: service_healthy
-      minio:
-        condition: service_healthy
+      - redis
+      - minio
     env_file:
       - ./.env 
     volumes:

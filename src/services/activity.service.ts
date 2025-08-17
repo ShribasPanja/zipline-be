@@ -10,9 +10,9 @@ export class ActivityService {
       timestamp: new Date(),
     };
 
-    this.activities.unshift(newActivity); // newest first
+    this.activities.unshift(newActivity); // Add to beginning for newest first
 
-    // keep recent 100
+    // Keep only last 100 activities to prevent memory issues
     if (this.activities.length > 100) {
       this.activities = this.activities.slice(0, 100);
     }
@@ -26,7 +26,7 @@ export class ActivityService {
   static getActivities(filter: ActivityFilter = {}): Activity[] {
     let filtered = [...this.activities];
 
-    // filter by criteria
+    // Apply filters
     if (filter.type) {
       filtered = filtered.filter((activity) => activity.type === filter.type);
     }
@@ -39,7 +39,7 @@ export class ActivityService {
       );
     }
 
-    // pagination
+    // Apply pagination
     const offset = filter.offset || 0;
     const limit = filter.limit || 20;
 
@@ -56,7 +56,7 @@ export class ActivityService {
   }
 
   static seedSampleActivities(): void {
-    // add demo activities
+    // Add some sample activities for demonstration
     this.addActivity({
       type: "webhook_setup",
       repository: {

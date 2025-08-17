@@ -26,7 +26,7 @@ interface PipelineResult {
   success: boolean;
   error?: string;
   duration: number;
-  tempDir?: string;
+  tempDir?: string; // Add temp directory to result
   steps: {
     name: string;
     success: boolean;
@@ -70,6 +70,7 @@ export class PipelineHelper {
   }
 
   static validateBranchAccess(pipeline: Pipeline, branchName: string): boolean {
+    // If no 'on' configuration exists, allow all branches (backward compatibility)
     if (!pipeline.on || !pipeline.on.push || !pipeline.on.push.branches) {
       console.log(
         `[PIPELINE] No branch restrictions found, allowing execution for branch: ${branchName}`
@@ -84,6 +85,7 @@ export class PipelineHelper {
       )}`
     );
 
+    // Use micromatch to support wildcard patterns like main, develop, feature/*
     const isAllowed = micromatch.isMatch(branchName, allowedBranches);
 
     if (isAllowed) {
@@ -117,8 +119,10 @@ export class PipelineHelper {
     };
 
     try {
+      // Ensure temp directory parent exists
       await mkdir(path.dirname(tempDir), { recursive: true });
 
+      // Clone the repository
       const gitInstance = simpleGit({
         baseDir: path.dirname(tempDir),
         binary: "git",
@@ -133,11 +137,13 @@ export class PipelineHelper {
 
       await gitInstance.clone(normalizedUrl, tempDir, cloneOptions);
 
+      // Verify clone success
       const clonedFiles = await readdir(tempDir);
       if (clonedFiles.length === 0) {
         throw new Error("Repository cloned but appears to be empty");
       }
 
+      // Read and validate pipeline configuration
       const yamlPath = path.join(tempDir, ".zipline/pipeline.yml");
       if (!existsSync(yamlPath)) {
         throw new Error(
@@ -150,6 +156,7 @@ export class PipelineHelper {
         throw new Error("No steps defined in pipeline configuration");
       }
 
+      // Validate branch access before proceeding with pipeline execution
       if (branch && !this.validateBranchAccess(pipeline, branch)) {
         throw new Error(
           `Branch '${branch}' is not allowed to trigger this pipeline. ` +

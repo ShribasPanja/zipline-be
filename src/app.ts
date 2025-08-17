@@ -20,18 +20,23 @@ class App {
   }
 
   private initializeMiddleware(): void {
+    // Request logging
     this.app.use(requestLogger);
 
+    // CORS configuration
     this.app.use(cors(config.cors));
 
+    // Body parsing middleware
     this.app.use(express.json());
     this.app.use(express.urlencoded({ extended: true }));
   }
 
   private initializeRoutes(): void {
+    // Mount API routes
     this.app.use("/api", routes);
-    this.app.use("/", routes);
+    this.app.use("/", routes); // Also mount routes at root for backward compatibility
 
+    // Root endpoint
     this.app.get("/", (req, res) => {
       res.json({
         message: "Zipline Backend API",
@@ -46,12 +51,15 @@ class App {
   }
 
   private initializeErrorHandling(): void {
+    // 404 handler
     this.app.use(notFoundHandler);
 
+    // Global error handler
     this.app.use(errorHandler);
   }
 
   private initializeSocket(): void {
+    // Initialize Socket.IO
     const socketService = SocketService.getInstance();
     socketService.initialize(this.server);
   }

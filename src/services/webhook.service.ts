@@ -8,6 +8,7 @@ export class WebhookService {
     try {
       const { repository, head_commit, pusher } = payload;
 
+      // Extract branch name from ref (refs/heads/branch-name -> branch-name)
       const branchName = payload.ref.replace("refs/heads/", "");
       console.log(`[INFO] Push event received for repo: ${repository.name}`);
       console.log(`[INFO] Branch: ${branchName}`);
@@ -15,6 +16,7 @@ export class WebhookService {
       console.log(`[INFO] Pushed by: ${pusher.name} (${pusher.email})`);
       console.log(`[INFO] Commit ID: ${head_commit.id}`);
 
+      // Log the push activity
       ActivityService.addActivity({
         type: "push",
         repository: {
@@ -42,6 +44,7 @@ export class WebhookService {
         },
       });
 
+      // Trigger pipeline execution asynchronously
       console.log(
         `[INFO] Triggering pipeline for ${repository.name} (${repository.clone_url}) on branch ${branchName}`
       );
@@ -89,8 +92,9 @@ export class WebhookService {
         .update(payload, "utf8")
         .digest("hex");
 
-      const actualSignature = signature.slice(7);
+      const actualSignature = signature.slice(7); // Remove 'sha256=' prefix
 
+      // Use crypto.timingSafeEqual to prevent timing attacks
       const expectedBuffer = Buffer.from(expectedSignature, "hex");
       const actualBuffer = Buffer.from(actualSignature, "hex");
 
@@ -121,6 +125,7 @@ export class WebhookService {
     secret?: string
   ): Promise<void> {
     try {
+      // Validate webhook signature if secret is provided
       if (secret && signature) {
         const payloadString = JSON.stringify(payload);
         const isValid = this.validateWebhookSignature(
@@ -134,6 +139,7 @@ export class WebhookService {
         }
       }
 
+      // Process different event types
       switch (eventType) {
         case "push":
           await this.handlePushEvent(payload);

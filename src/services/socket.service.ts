@@ -35,15 +35,18 @@ export class SocketService {
     this.io.on("connection", (socket) => {
       console.log(`[SOCKET] Client connected: ${socket.id}`);
 
+      // Join pipeline execution room
       socket.on("join-pipeline", (executionId: string) => {
         socket.join(`pipeline-${executionId}`);
         console.log(
           `[SOCKET] Client ${socket.id} joined pipeline-${executionId}`
         );
 
+        // Send confirmation
         socket.emit("joined-pipeline", { executionId });
       });
 
+      // Leave pipeline execution room
       socket.on("leave-pipeline", (executionId: string) => {
         socket.leave(`pipeline-${executionId}`);
         console.log(
@@ -59,6 +62,7 @@ export class SocketService {
     });
   }
 
+  // Emit pipeline log to all clients watching a specific execution
   public emitPipelineLog(
     executionId: string,
     logData: {
@@ -79,6 +83,7 @@ export class SocketService {
     console.log(`[SOCKET] Emitted log to room ${room}: ${logData.message}`);
   }
 
+  // Emit pipeline status update
   public emitPipelineStatus(
     executionId: string,
     status: "pending" | "running" | "success" | "failed",
@@ -98,6 +103,7 @@ export class SocketService {
     console.log(`[SOCKET] Emitted status to room ${room}: ${status}`);
   }
 
+  // Emit step status update for live DAG visualization
   public emitStepStatus(
     executionId: string,
     stepName: string,
@@ -128,6 +134,7 @@ export class SocketService {
     );
   }
 
+  // Emit DAG update for real-time visualization
   public emitDAGUpdate(
     executionId: string,
     dagData: {
@@ -151,10 +158,12 @@ export class SocketService {
     console.log(`[SOCKET] Emitted DAG update to room ${room}`);
   }
 
+  // Get Socket.IO instance
   public getIO(): SocketIOServer | null {
     return this.io;
   }
 
+  // Get number of clients in a pipeline room
   public async getRoomClientCount(executionId: string): Promise<number> {
     if (!this.io) return 0;
 

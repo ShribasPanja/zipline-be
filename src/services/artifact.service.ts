@@ -28,27 +28,23 @@ export class ArtifactService {
 
   constructor() {
     // Get configuration from environment variables
-    const minioEndpoint = process.env.MINIO_ENDPOINT || "http://minio:9000";
-    const minioAccessKey = process.env.MINIO_ID || "admin";
-    const minioSecretKey = process.env.MINIO_SECRET || "StrongPass123";
-    this.bucketName = process.env.MINIO_BUCKET || "zipline-artifacts";
-
-    console.log(`[ARTIFACT] Initializing with endpoint: ${minioEndpoint}`);
-    console.log(`[ARTIFACT] Using bucket: ${this.bucketName}`);
-    console.log(`[ARTIFACT] Access key: ${minioAccessKey}`);
-
+    this.bucketName = process.env.AWS_S3_BUCKET || "zipline-artifacts";
+    
+    // Configure S3 client for AWS S3 or MinIO
     this.s3Client = new S3Client({
-      endpoint: minioEndpoint,
-      region: "us-east-1",
+      endpoint: process.env.MINIO_ENDPOINT || undefined, // Use AWS S3 if not set
+      region: process.env.AWS_REGION || "us-east-1",
       credentials: {
-        accessKeyId: minioAccessKey,
-        secretAccessKey: minioSecretKey,
+        accessKeyId: process.env.AWS_ACCESS_KEY_ID || process.env.MINIO_ACCESS_KEY || "",
+        secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY || process.env.MINIO_SECRET_KEY || "",
       },
-      forcePathStyle: true,
+      forcePathStyle: !!process.env.MINIO_ENDPOINT, // Required for MinIO, optional for AWS
     });
   }
 
-  // Save artifacts if the step succeeded
+  /**
+   * Save artifacts for a step if it's successful
+   */
   async saveArtifacts(
     executionId: string,
     stepName: string,
@@ -98,7 +94,9 @@ export class ArtifactService {
     return results;
   }
 
-  // Zip a file or directory and upload it to MinIO
+  /**
+   * Save a single artifact by zipping it and uploading to MinIO
+   */
   async saveArtifact(
     executionId: string,
     stepName: string,
@@ -108,13 +106,14 @@ export class ArtifactService {
   ): Promise<UploadResult> {
     const fullPath = path.resolve(workingDir, artifactPath);
 
+    // Check if the artifact path exists
     try {
       await stat(fullPath);
     } catch (error) {
       throw new Error(`Artifact path not found: ${artifactPath}`);
     }
 
-    // Artifact metadata
+    // Generate artifact metadata
     const artifactId = uuidv4();
     const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
     const zipFileName = customName
@@ -158,7 +157,9 @@ export class ArtifactService {
     }
   }
 
-  // Create zip archive from file or directory
+  /**
+   * Create a zip archive from a file or directory
+   */
   private async createZipArchive(
     sourcePath: string,
     outputPath: string
@@ -207,7 +208,9 @@ export class ArtifactService {
     });
   }
 
-  // Upload file to MinIO
+  /**
+   * Upload file to MinIO server
+   */
   private async uploadToMinIO(filePath: string, key: string): Promise<void> {
     try {
       const fileStream = fs.createReadStream(filePath);
@@ -237,16 +240,14 @@ export class ArtifactService {
     }
   }
 
-  // Ensure MinIO bucket exists
+  /**
+   * Ensure the MinIO bucket exists (should be called during initialization)
+   */
   async initializeBucket(): Promise<void> {
     try {
-      console.log(
-        `[ARTIFACT] Connecting to MinIO at: ${
-          process.env.MINIO_ENDPOINT || "http://minio:9000"
-        }`
-      );
-      console.log(`[ARTIFACT] Using bucket: ${this.bucketName}`);
-
+      console.log(`[ARTIFACT] Initializing bucket: ${this.bucketName}`);
+      console.log(`[ARTIFACT] Using endpoint: ${process.env.MINIO_ENDPOINT || 'AWS S3'}`);
+      
       // Try to create bucket (MinIO will ignore if it already exists)
       const { CreateBucketCommand, HeadBucketCommand } = await import(
         "@aws-sdk/client-s3"
@@ -254,16 +255,12 @@ export class ArtifactService {
 
       try {
         // Check if bucket exists
-        console.log(
-          `[ARTIFACT] Checking if bucket '${this.bucketName}' exists...`
-        );
         await this.s3Client.send(
           new HeadBucketCommand({ Bucket: this.bucketName })
         );
         console.log(`[ARTIFACT] Bucket '${this.bucketName}' already exists`);
       } catch (error: any) {
-        console.log(`[ARTIFACT] Bucket check failed:`, error.name, error.code);
-        if (error.name === "NotFound" || error.code === "NoSuchBucket") {
+        if (error.name === "NotFound" || error.name === "NoSuchBucket") {
           // Bucket doesn't exist, create it
           console.log(`[ARTIFACT] Creating bucket: ${this.bucketName}`);
           await this.s3Client.send(
@@ -271,20 +268,24 @@ export class ArtifactService {
           );
           console.log(`[ARTIFACT] Created bucket: ${this.bucketName}`);
         } else {
+          console.error(`[ARTIFACT] Bucket check error:`, error);
           throw error;
         }
       }
     } catch (error: any) {
-      console.error(`[ARTIFACT] Failed to initialize bucket:`);
-      console.error("Full error:", error);
-      console.error("Error name:", error.name);
-      console.error("Error code:", error.code);
-      console.error("Error message:", error.message);
+      console.error(`[ARTIFACT] Failed to initialize bucket:`, {
+        message: error.message,
+        code: error.code,
+        statusCode: error.$metadata?.httpStatusCode,
+        requestId: error.$metadata?.requestId
+      });
       throw error;
     }
   }
 
-  // Generate signed download URL
+  /**
+   * Get artifact download URL (for future use)
+   */
   async getArtifactUrl(key: string, expiresIn: number = 3600): Promise<string> {
     try {
       const { GetObjectCommand } = await import("@aws-sdk/client-s3");
@@ -305,7 +306,9 @@ export class ArtifactService {
     }
   }
 
-  // List artifacts for an execution
+  /**
+   * List artifacts for an execution
+   */
   async listArtifacts(executionId: string): Promise<any[]> {
     try {
       const { ListObjectsV2Command } = await import("@aws-sdk/client-s3");

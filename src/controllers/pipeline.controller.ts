@@ -11,6 +11,7 @@ export class PipelineController {
     try {
       const { repoUrl, repoName, branch } = req.body;
 
+      // Validate required fields
       if (!repoUrl || !repoName) {
         return ResponseHelper.error(
           res,
@@ -19,6 +20,7 @@ export class PipelineController {
         );
       }
 
+      // All pipeline executions now use DAG orchestrator (supports both parallel and sequential steps)
       console.log(`[API] Starting DAG pipeline execution for ${repoName}`);
 
       const executionId = await PipelineService.executePipelineDAG(
@@ -44,6 +46,7 @@ export class PipelineController {
     } catch (error: any) {
       console.error("[API] Pipeline execution failed:", error);
 
+      // Log pipeline failure activity
       const { repoName, repoUrl } = req.body;
       if (repoName) {
         ActivityService.addActivity({
@@ -105,6 +108,7 @@ export class PipelineController {
         return ResponseHelper.error(res, "Execution ID is required", 400);
       }
 
+      // Get pipeline run info
       const { PipelineRunRepository } = await import(
         "../repositories/pipelineRun.repository"
       );
@@ -116,6 +120,7 @@ export class PipelineController {
         return ResponseHelper.error(res, "Pipeline execution not found", 404);
       }
 
+      // Get logs
       const logs = await PipelineLogRepository.getLogsByExecutionId(
         executionId
       );
@@ -158,6 +163,7 @@ export class PipelineController {
     try {
       const { repoName, limit } = req.query;
 
+      // Get pipeline runs from database
       const { PipelineRunRepository } = await import(
         "../repositories/pipelineRun.repository"
       );
@@ -166,6 +172,7 @@ export class PipelineController {
         limit: limit ? parseInt(limit as string) : 50,
       });
 
+      // Calculate basic stats
       const total = executions.length;
       const successful = executions.filter(
         (e) => e.status === "SUCCESS"
@@ -228,6 +235,8 @@ export class PipelineController {
         );
       }
 
+      // This would typically clone the repo temporarily to check for pipeline config
+      // For now, we'll return a simple validation
       return ResponseHelper.success(
         res,
         {
@@ -276,7 +285,7 @@ export class PipelineController {
       const { maxAge } = req.body;
       const maxAgeMs = maxAge
         ? parseInt(maxAge) * 60 * 60 * 1000
-        : 24 * 60 * 60 * 1000;
+        : 24 * 60 * 60 * 1000; // default 24 hours
 
       PipelineService.cleanupOldExecutions(maxAgeMs);
 
@@ -299,6 +308,7 @@ export class PipelineController {
         return ResponseHelper.error(res, "Execution ID is required", 400);
       }
 
+      // Get pipeline run info from database
       const { PipelineRunRepository } = await import(
         "../repositories/pipelineRun.repository"
       );
@@ -310,6 +320,7 @@ export class PipelineController {
         return ResponseHelper.error(res, "Pipeline execution not found", 404);
       }
 
+      // Clone repository and read actual pipeline.yml
       let tempDir: string;
       let pipelineSteps: any[] = [];
 
@@ -321,7 +332,7 @@ export class PipelineController {
           pipelineRun.repoUrl,
           pipelineRun.repoName,
           pipelineRun.branch || "main",
-          true
+          true // validate only, don't execute
         );
 
         if (!pipeRes.success || !pipeRes.tempDir) {
@@ -343,6 +354,7 @@ export class PipelineController {
           `[DAG] Found ${pipelineSteps.length} steps in pipeline.yml`
         );
 
+        // Cleanup temp directory after reading
         setTimeout(() => {
           try {
             if (require("fs").existsSync(tempDir)) {
@@ -372,6 +384,7 @@ export class PipelineController {
         );
       }
 
+      // Transform to ReactFlow format using actual pipeline data
       const dagData = PipelineController.transformToReactFlow(pipelineSteps);
 
       const response = {
@@ -407,18 +420,20 @@ export class PipelineController {
   }
 
   private static transformToReactFlow(steps: any[]) {
+    // Create a dependency map for better layout calculation
     const stepMap = new Map();
     steps.forEach((step) => {
       stepMap.set(step.name, step);
     });
 
+    // Calculate levels (depth) for each step based on dependencies
     const levelMap = new Map<string, number>();
     const calculateLevel = (stepName: string, visited = new Set()): number => {
       if (visited.has(stepName)) {
         console.warn(
           `[DAG] Circular dependency detected involving step: ${stepName}`
         );
-        return 0;
+        return 0; // Break circular dependency
       }
 
       if (levelMap.has(stepName)) {
@@ -443,8 +458,10 @@ export class PipelineController {
       return level;
     };
 
+    // Calculate levels for all steps
     steps.forEach((step) => calculateLevel(step.name));
 
+    // Group steps by level for better positioning
     const levelGroups = new Map<number, string[]>();
     for (const [stepName, level] of levelMap.entries()) {
       if (!levelGroups.has(level)) {
@@ -453,35 +470,38 @@ export class PipelineController {
       levelGroups.get(level)!.push(stepName);
     }
 
+    // Create nodes with improved positioning
     const nodes = steps.map((step, index) => {
       const level = levelMap.get(step.name) || 0;
       const stepsAtLevel = levelGroups.get(level) || [];
       const indexAtLevel = stepsAtLevel.indexOf(step.name);
       const totalAtLevel = stepsAtLevel.length;
 
-      const xSpacing = 400;
-      const ySpacing = 250;
+      // Calculate position with better spacing
+      const xSpacing = 400; // Increased horizontal spacing between levels
+      const ySpacing = 250; // Increased vertical spacing between nodes
       const yOffset =
         totalAtLevel > 1
           ? (indexAtLevel - (totalAtLevel - 1) / 2) * ySpacing
           : 0;
 
+      // Determine node type based on dependencies
       const dependencies = step.needs || [];
       const isRoot = dependencies.length === 0;
       const isLeaf = !steps.some((s) => s.needs && s.needs.includes(step.name));
 
-      let nodeColor = "#1f2937";
-      let borderColor = "#374151";
-      let textColor = "#10b981";
+      let nodeColor = "#1f2937"; // default
+      let borderColor = "#374151"; // default
+      let textColor = "#10b981"; // green
 
       if (isRoot) {
-        nodeColor = "#0f172a";
-        borderColor = "#1e40af";
-        textColor = "#3b82f6";
+        nodeColor = "#0f172a"; // darker for root nodes
+        borderColor = "#1e40af"; // blue border for starting nodes
+        textColor = "#3b82f6"; // blue text
       } else if (isLeaf) {
-        nodeColor = "#1a1a1a";
-        borderColor = "#dc2626";
-        textColor = "#f87171";
+        nodeColor = "#1a1a1a"; // darker for leaf nodes
+        borderColor = "#dc2626"; // red border for final nodes
+        textColor = "#f87171"; // red text
       }
 
       return {
@@ -516,6 +536,7 @@ export class PipelineController {
       };
     });
 
+    // Create edges with enhanced styling and labels
     const edges: any[] = [];
     steps.forEach((step) => {
       const dependencies = step.needs || [];
@@ -560,6 +581,7 @@ export class PipelineController {
       });
     });
 
+    // Add flow statistics
     const stats = {
       totalSteps: steps.length,
       maxLevel: Math.max(...Array.from(levelMap.values())),

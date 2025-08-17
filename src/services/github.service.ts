@@ -97,6 +97,7 @@ export class GitHubService {
         `[ERROR] Failed to fetch webhooks for ${repoFullName}:`,
         error
       );
+      // Return empty array if we can't fetch webhooks (might be permission issue)
       return [];
     }
   }
@@ -113,10 +114,12 @@ export class GitHubService {
       );
 
       if (webhookUrl) {
+        // Check for specific webhook URL
         return webhooks.some(
           (hook) => hook.active && hook.config?.url === webhookUrl
         );
       } else {
+        // Check if any active webhook exists
         return webhooks.some((hook) => hook.active);
       }
     } catch (error) {
@@ -134,6 +137,7 @@ export class GitHubService {
   ): Promise<Record<string, boolean>> {
     const results: Record<string, boolean> = {};
 
+    // Process repositories in parallel but limit concurrency to avoid rate limiting
     const batchSize = 5;
     for (let i = 0; i < repoFullNames.length; i += batchSize) {
       const batch = repoFullNames.slice(i, i + batchSize);
@@ -164,9 +168,9 @@ export class GitHubService {
       const response = await axios.post(
         `https://api.github.com/repos/${repoFullName}/hooks`,
         {
-          name: "web",
+          name: "web", // The type of hook
           active: true,
-          events: ["push"],
+          events: ["push"], // We only care about push events for now
           config: {
             url: hookUrl,
             content_type: "json",
@@ -182,6 +186,7 @@ export class GitHubService {
 
       console.log(`[INFO] Successfully created webhook for ${repoFullName}`);
 
+      // Log webhook setup activity
       ActivityService.addActivity({
         type: "webhook_setup",
         repository: {
@@ -203,6 +208,7 @@ export class GitHubService {
         error.response?.data || error.message
       );
 
+      // Handle specific GitHub API errors
       if (error.response?.status === 422) {
         throw new Error("Webhook already exists or repository access denied");
       } else if (error.response?.status === 404) {

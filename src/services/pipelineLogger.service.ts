@@ -43,6 +43,7 @@ export class PipelineLoggerService {
       }
     }
 
+    // Load secrets for sanitization
     if (this.repoFullName) {
       try {
         this.secrets = await SecretsService.getSecretsForRepository(
@@ -66,6 +67,7 @@ export class PipelineLoggerService {
     level: "info" | "warn" | "error" = "info",
     step?: string
   ) {
+    // Sanitize message to remove any secret values
     const sanitizedMessage = SecretsService.sanitizeLogContent(
       message,
       this.secrets
@@ -75,6 +77,7 @@ export class PipelineLoggerService {
       step ? `[${step}] ` : ""
     }${sanitizedMessage}`;
 
+    // Always log to console first (with sanitized content)
     console.log(logMessage);
 
     let savedLog: any = null;
@@ -87,7 +90,7 @@ export class PipelineLoggerService {
         savedLog = await PipelineLogRepository.create({
           runId: this.runId,
           level,
-          message: sanitizedMessage,
+          message: sanitizedMessage, // Store sanitized message
           step,
         });
         console.log(
@@ -104,11 +107,12 @@ export class PipelineLoggerService {
       );
     }
 
+    // Emit real-time log via Socket.IO (with sanitized content)
     try {
       const logData = {
         id: savedLog?.id || `temp-${Date.now()}`,
         level,
-        message: sanitizedMessage,
+        message: sanitizedMessage, // Emit sanitized message
         step,
         timestamp: new Date().toISOString(),
       };

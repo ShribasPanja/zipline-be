@@ -100,9 +100,12 @@ export class QueueController {
       const { executionId } = req.params;
       const socket = SocketService.getInstance();
 
+      // First check if this is a DAG execution
       if (executionId.startsWith("dag-")) {
+        // Mark the execution as cancelled first
         cancelDAGExecution(executionId);
 
+        // Cancel DAG pipeline jobs
         const [activeStepJobs, activeDagJobs, waitingStepJobs, waitingDagJobs] =
           await Promise.all([
             dagStepQueue.getActive(),
@@ -114,8 +117,10 @@ export class QueueController {
         let cancelledJobs = 0;
         let forceCancelledJobs = 0;
 
+        // Function to safely cancel a job
         const cancelJobSafely = async (job: any, queueName: string) => {
           try {
+            // First try to remove normally (for waiting jobs)
             await job.remove();
             cancelledJobs++;
             console.log(
@@ -124,6 +129,7 @@ export class QueueController {
           } catch (error: any) {
             if (error.message.includes("locked")) {
               try {
+                // For locked jobs, try to move to failed state
                 await job.moveToFailed({ message: "Cancelled by user" });
                 forceCancelledJobs++;
                 console.log(
@@ -136,6 +142,7 @@ export class QueueController {
                     ? failError.message
                     : String(failError)
                 );
+                // Mark it in our database anyway
                 forceCancelledJobs++;
               }
             } else {
@@ -147,36 +154,42 @@ export class QueueController {
           }
         };
 
+        // Cancel waiting step jobs for this execution (these should remove easily)
         for (const job of waitingStepJobs) {
           if (job.data.executionId === executionId) {
             await cancelJobSafely(job, "step-waiting");
           }
         }
 
+        // Cancel waiting orchestrator jobs for this execution
         for (const job of waitingDagJobs) {
           if (job.data.executionId === executionId) {
             await cancelJobSafely(job, "dag-waiting");
           }
         }
 
+        // Cancel active step jobs for this execution (these might be locked)
         for (const job of activeStepJobs) {
           if (job.data.executionId === executionId) {
             await cancelJobSafely(job, "step-active");
           }
         }
 
+        // Cancel active orchestrator jobs for this execution (these might be locked)
         for (const job of activeDagJobs) {
           if (job.data.executionId === executionId) {
             await cancelJobSafely(job, "dag-active");
           }
         }
 
+        // Update database status
         await PipelineRunRepository.updateByExecutionId(executionId, {
           status: "FAILED",
           finishedAt: new Date(),
           errorMessage: "Pipeline cancelled by user",
         }).catch(() => {});
 
+        // Emit cancellation status
         socket.emitPipelineStatus(executionId, "failed", {
           error: "Pipeline cancelled by user",
           cancelled: true,
@@ -194,12 +207,14 @@ export class QueueController {
           },
         });
       } else {
+        // Handle regular pipeline cancellation
         const [activeJobs, waitingJobs] = await Promise.all([
           pipelineQueue.getActive(),
           pipelineQueue.getWaiting(),
         ]);
         let cancelled = false;
 
+        // Function to safely cancel a regular pipeline job
         const cancelRegularJob = async (job: any, isActive: boolean) => {
           try {
             await job.remove();
@@ -222,7 +237,7 @@ export class QueueController {
                     ? failError.message
                     : String(failError)
                 );
-                cancelled = true;
+                cancelled = true; // Mark as cancelled anyway since we'll update the DB
               }
             } else {
               console.error(
@@ -233,6 +248,7 @@ export class QueueController {
           }
         };
 
+        // Try waiting jobs first (easier to cancel)
         for (const job of waitingJobs) {
           if (job.data.executionId === executionId) {
             await cancelRegularJob(job, false);
@@ -240,6 +256,7 @@ export class QueueController {
           }
         }
 
+        // If not found in waiting, try active jobs
         if (!cancelled) {
           for (const job of activeJobs) {
             if (job.data.executionId === executionId) {
@@ -250,6 +267,7 @@ export class QueueController {
         }
 
         if (!cancelled) {
+          // Check waiting jobs
           const waitingJobs = await pipelineQueue.getWaiting();
           for (const job of waitingJobs) {
             if (job.data.executionId === executionId) {
@@ -261,12 +279,14 @@ export class QueueController {
         }
 
         if (cancelled) {
+          // Update database status
           await PipelineRunRepository.updateByExecutionId(executionId, {
             status: "FAILED",
             finishedAt: new Date(),
             errorMessage: "Pipeline cancelled by user",
           }).catch(() => {});
 
+          // Emit cancellation status
           socket.emitPipelineStatus(executionId, "failed", {
             error: "Pipeline cancelled by user",
             cancelled: true,
@@ -297,6 +317,7 @@ export class QueueController {
     try {
       const { executionId } = req.params;
 
+      // Get the original pipeline run details
       const originalRun = await PipelineRunRepository.findByExecutionId(
         executionId
       );
@@ -309,7 +330,9 @@ export class QueueController {
         return;
       }
 
+      // Check if this was a DAG execution
       if (executionId.startsWith("dag-")) {
+        // Create new DAG pipeline job
         const newExecutionId = await addDAGPipelineJob({
           repoUrl: originalRun.repoUrl,
           repoName: originalRun.repoName,
@@ -329,6 +352,7 @@ export class QueueController {
           },
         });
       } else {
+        // Handle regular pipeline rerun - you'll need to implement this based on your regular pipeline logic
         res.status(501).json({
           success: false,
           error: "Regular pipeline rerun not yet implemented",

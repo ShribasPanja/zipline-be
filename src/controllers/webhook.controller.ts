@@ -20,14 +20,17 @@ export class WebhookController {
 
       const payload: GitHubWebhookPayload = req.body;
 
+      // Validate payload structure for events we care about
       if (event === "push" && (!payload.repository || !payload.head_commit)) {
         ResponseHelper.error(res, "Invalid webhook payload", 400);
         return;
       }
 
+      // Get webhook secret from environment
       const webhookSecret = process.env.GITHUB_WEBHOOK_SECRET;
 
       try {
+        // Process the webhook event with signature validation
         await WebhookService.processWebhookEvent(
           event,
           payload,
@@ -76,6 +79,8 @@ export class WebhookController {
         return;
       }
 
+      // For now, just return success with webhook setup info
+      // In a real implementation, you might verify the repository exists and is accessible
       ResponseHelper.success(
         res,
         {

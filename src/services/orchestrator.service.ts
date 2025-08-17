@@ -1,3 +1,4 @@
+// Local minimal contract to avoid coupling with docker.service types
 export interface StepLike {
   name: string;
   image: string;
