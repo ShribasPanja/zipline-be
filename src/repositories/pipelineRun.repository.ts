@@ -1,5 +1,4 @@
 import { DbService } from "../services/db.service";
-import { Prisma } from "@prisma/client";
 
 // Local enum type matching Prisma schema to avoid missing generated types
 export type PipelineStatusLocal =
@@ -100,7 +99,7 @@ export const PipelineRunRepository = {
     const prisma = DbService.getClient();
     if (!prisma) return [];
     try {
-      const where: Prisma.PipelineRunWhereInput = {} as any;
+  const where: any = {};
       if (params?.repoName) where.repoName = params.repoName;
       return await prisma.pipelineRun.findMany({
         where,
