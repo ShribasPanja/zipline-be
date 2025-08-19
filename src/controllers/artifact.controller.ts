@@ -56,7 +56,7 @@ export class ArtifactController {
       }
 
       // Generate backend download URL instead of direct MinIO URL
-      const backendUrl = process.env.BACKEND_URL || "http://localhost:3001";
+      const backendUrl = process.env.BACKEND_URL || "https://api.zipline.shribas.me";
       const downloadUrl = `${backendUrl}/api/artifacts/${executionId}/${stepName}/${fileName}/stream`;
 
       return ResponseHelper.success(
