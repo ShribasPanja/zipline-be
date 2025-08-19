@@ -8,18 +8,37 @@ import { PipelineLogRepository } from "../repositories/pipelineLog.repository";
 
 export class PipelineController {
   static async executePipeline(req: Request, res: Response) {
-    try {
-      const { repoUrl, repoName, branch } = req.body;
+    const { repoUrl, repoName, branch } = req.body;
 
-      // Validate required fields
-      if (!repoUrl || !repoName) {
-        return ResponseHelper.error(
-          res,
-          "Repository URL and name are required",
-          400
+    // Validate required fields
+    if (!repoUrl || !repoName) {
+      return ResponseHelper.error(
+        res,
+        "Repository URL and name are required",
+        400
+      );
+    }
+
+    // Get user info from authentication header for manual executions
+    let userInfo: any = undefined;
+    const authHeader = req.headers.authorization;
+    if (authHeader && authHeader.startsWith("Bearer ")) {
+      try {
+        const token = authHeader.substring(7);
+        const { GitHubService } = await import("../services/github.service");
+        userInfo = await GitHubService.getUserInfo(token);
+        console.log(
+          `[API] Manual execution by user: ${userInfo.login} (${userInfo.id})`
+        );
+      } catch (error) {
+        console.warn(
+          "[API] Could not get user info for manual execution:",
+          error
         );
       }
+    }
 
+    try {
       // All pipeline executions now use DAG orchestrator (supports both parallel and sequential steps)
       console.log(`[API] Starting DAG pipeline execution for ${repoName}`);
 
@@ -27,7 +46,16 @@ export class PipelineController {
         repoUrl,
         repoName,
         branch,
-        { name: repoName, full_name: repoName }
+        { name: repoName, full_name: repoName },
+        undefined, // no trigger commit for manual executions
+        userInfo
+          ? {
+              userId: userInfo.id.toString(),
+              login: userInfo.login,
+              name: userInfo.name || userInfo.login,
+              email: userInfo.email,
+            }
+          : undefined
       );
 
       console.log(
@@ -48,13 +76,19 @@ export class PipelineController {
 
       // Log pipeline failure activity
       const { repoName, repoUrl } = req.body;
-      if (repoName) {
+      if (repoName && userInfo) {
         ActivityService.addActivity({
           type: "pipeline_execution",
           status: "failed",
           repository: {
             name: repoName,
             full_name: repoName,
+          },
+          user: {
+            id: userInfo.id.toString(),
+            login: userInfo.login,
+            name: userInfo.name || userInfo.login,
+            email: userInfo.email,
           },
           metadata: {
             error: error.message,
@@ -163,14 +197,62 @@ export class PipelineController {
     try {
       const { repoName, limit } = req.query;
 
-      // Get pipeline runs from database
+      // Require authentication to get executions
+      const authHeader = req.headers.authorization;
+      if (!authHeader || !authHeader.startsWith("Bearer ")) {
+        return ResponseHelper.error(
+          res,
+          "Authentication required to view executions",
+          401
+        );
+      }
+
+      // Get current user from token to filter executions
+      let currentUser: any;
+      try {
+        const token = authHeader.substring(7);
+        const { GitHubService } = await import("../services/github.service");
+        currentUser = await GitHubService.getUserInfo(token);
+        console.log(
+          `[API] Filtering executions for user: ${currentUser.login} (ID: ${currentUser.id})`
+        );
+      } catch (userError) {
+        console.error(
+          "[API] Failed to get user info for filtering:",
+          userError
+        );
+        return ResponseHelper.error(res, "Invalid authentication token", 401);
+      }
+
+      // Get pipeline runs from database - only for the authenticated user
       const { PipelineRunRepository } = await import(
         "../repositories/pipelineRun.repository"
       );
-      const executions = await PipelineRunRepository.list({
+
+      // First, let's see all executions to debug
+      const allExecutions = await PipelineRunRepository.list({
         repoName: repoName as string,
         limit: limit ? parseInt(limit as string) : 50,
       });
+      console.log(`[API] Total executions in DB: ${allExecutions.length}`);
+      console.log(
+        `[API] Sample triggerUserIds:`,
+        allExecutions.slice(0, 5).map((e) => ({
+          id: e.id,
+          triggerUserId: e.triggerUserId,
+          triggerUserLogin: e.triggerUserLogin,
+          repoName: e.repoName,
+        }))
+      );
+
+      const executions = await PipelineRunRepository.list({
+        repoName: repoName as string,
+        limit: limit ? parseInt(limit as string) : 50,
+        triggerUserId: currentUser.id.toString(), // Filter by current user ID
+      });
+      console.log(
+        `[API] Filtered executions for user ${currentUser.id}: ${executions.length}`
+      );
 
       // Calculate basic stats
       const total = executions.length;
@@ -205,6 +287,8 @@ export class PipelineController {
             triggerCommit: exec.triggerCommitId,
             triggerAuthorName: exec.triggerAuthorName,
             triggerAuthorEmail: exec.triggerAuthorEmail,
+            triggerUserId: exec.triggerUserId,
+            triggerUserLogin: exec.triggerUserLogin,
             startedAt: exec.queuedAt,
             completedAt: exec.finishedAt,
             duration: exec.durationMs
@@ -217,6 +301,65 @@ export class PipelineController {
       );
     } catch (error: any) {
       console.error("[API] Get executions failed:", error);
+      return ResponseHelper.error(
+        res,
+        error.message || "Internal server error",
+        500
+      );
+    }
+  }
+
+  static async getAllExecutionsDebug(req: Request, res: Response) {
+    try {
+      const { limit } = req.query;
+
+      // Get all pipeline runs from database for debugging
+      const { PipelineRunRepository } = await import(
+        "../repositories/pipelineRun.repository"
+      );
+      const executions = await PipelineRunRepository.list({
+        limit: limit ? parseInt(limit as string) : 50,
+      });
+
+      console.log(`[DEBUG] Total executions in DB: ${executions.length}`);
+      console.log(
+        `[DEBUG] All triggerUserIds:`,
+        executions.map((e) => ({
+          id: e.id,
+          triggerUserId: e.triggerUserId,
+          triggerUserLogin: e.triggerUserLogin,
+          triggerAuthorName: e.triggerAuthorName,
+          repoName: e.repoName,
+        }))
+      );
+
+      return ResponseHelper.success(
+        res,
+        {
+          executions: executions.map((exec: any) => ({
+            id: exec.id,
+            executionId: exec.executionId,
+            repoName: exec.repoName,
+            repoUrl: exec.repoUrl,
+            branch: exec.branch,
+            status: exec.status.toLowerCase(),
+            triggerCommit: exec.triggerCommitId,
+            triggerAuthorName: exec.triggerAuthorName,
+            triggerAuthorEmail: exec.triggerAuthorEmail,
+            triggerUserId: exec.triggerUserId,
+            triggerUserLogin: exec.triggerUserLogin,
+            startedAt: exec.queuedAt,
+            completedAt: exec.finishedAt,
+            duration: exec.durationMs
+              ? `${Math.round(exec.durationMs / 1000)}s`
+              : null,
+          })),
+          total: executions.length,
+        },
+        "All executions retrieved (DEBUG)"
+      );
+    } catch (error: any) {
+      console.error("[API] Get all executions debug failed:", error);
       return ResponseHelper.error(
         res,
         error.message || "Internal server error",

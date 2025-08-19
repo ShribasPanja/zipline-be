@@ -1,4 +1,5 @@
 import { DbService } from "../services/db.service";
+import { Prisma } from "@prisma/client";
 
 // Local enum type matching Prisma schema to avoid missing generated types
 export type PipelineStatusLocal =
@@ -19,6 +20,8 @@ export type CreatePipelineRunInput = {
   triggerMessage?: string;
   triggerAuthorName?: string;
   triggerAuthorEmail?: string;
+  triggerUserId?: string; // GitHub user ID who triggered the pipeline
+  triggerUserLogin?: string; // GitHub username who triggered the pipeline
   queuedAt?: Date;
 };
 
@@ -50,6 +53,8 @@ export const PipelineRunRepository = {
           triggerMessage: input.triggerMessage,
           triggerAuthorName: input.triggerAuthorName,
           triggerAuthorEmail: input.triggerAuthorEmail,
+          triggerUserId: input.triggerUserId,
+          triggerUserLogin: input.triggerUserLogin,
           queuedAt: input.queuedAt ?? new Date(),
         },
       });
@@ -95,12 +100,23 @@ export const PipelineRunRepository = {
     }
   },
 
-  async list(params?: { repoName?: string; limit?: number }) {
+  async list(params?: {
+    repoName?: string;
+    limit?: number;
+    triggerAuthorName?: string;
+    triggerUserId?: string; // Filter by GitHub user ID
+    triggerUserLogin?: string; // Filter by GitHub username
+  }) {
     const prisma = DbService.getClient();
     if (!prisma) return [];
     try {
-  const where: any = {};
+      const where: Prisma.PipelineRunWhereInput = {} as any;
       if (params?.repoName) where.repoName = params.repoName;
+      if (params?.triggerAuthorName)
+        where.triggerAuthorName = params.triggerAuthorName;
+      if (params?.triggerUserId) where.triggerUserId = params.triggerUserId;
+      if (params?.triggerUserLogin)
+        where.triggerUserLogin = params.triggerUserLogin;
       return await prisma.pipelineRun.findMany({
         where,
         orderBy: { queuedAt: "desc" },

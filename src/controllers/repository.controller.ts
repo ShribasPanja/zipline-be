@@ -58,7 +58,50 @@ export class RepositoryController {
         return;
       }
 
+      // Get user info to store as repository owner
+      const userInfo = await GitHubService.getUserInfo(token);
+
       const result = await GitHubService.setupWebhook(token, repoFullName);
+
+      // Store repository owner information for future webhook filtering
+      const { RepositoryOwnerRepository } = await import(
+        "../repositories/repositoryOwner.repository"
+      );
+
+      await RepositoryOwnerRepository.upsert(repoFullName, {
+        repoFullName,
+        userId: userInfo.id.toString(),
+        userLogin: userInfo.login,
+        userName: userInfo.name || userInfo.login,
+        userEmail: userInfo.email,
+      });
+
+      console.log(
+        `[WEBHOOK_SETUP] Stored repository owner: ${userInfo.login} (${userInfo.id}) for ${repoFullName}`
+      );
+
+      // Log webhook setup activity with user information
+      const { ActivityService } = await import("../services/activity.service");
+      ActivityService.addActivity({
+        type: "webhook_setup",
+        repository: {
+          name: repoFullName.split("/")[1],
+          full_name: repoFullName,
+        },
+        user: {
+          id: userInfo.id.toString(),
+          login: userInfo.login,
+          name: userInfo.name || userInfo.login,
+          email: userInfo.email,
+        },
+        status: "success",
+        metadata: {
+          webhook_url: `${process.env.NGROK_URL}/webhook/github`,
+          events: ["push"],
+          webhook_id: result.id,
+        },
+      });
+
       ResponseHelper.success(
         res,
         result,

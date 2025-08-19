@@ -55,12 +55,9 @@ export class ArtifactController {
         );
       }
 
-      const key = `${executionId}/${stepName}/${fileName}`;
-      const downloadUrl =
-        await ArtifactController.artifactService.getArtifactUrl(
-          key,
-          parseInt(String(expiresIn))
-        );
+      // Generate backend download URL instead of direct MinIO URL
+      const backendUrl = process.env.BACKEND_URL || "http://localhost:3001";
+      const downloadUrl = `${backendUrl}/api/artifacts/${executionId}/${stepName}/${fileName}/stream`;
 
       return ResponseHelper.success(
         res,
@@ -84,12 +81,42 @@ export class ArtifactController {
   }
 
   /**
+   * Stream artifact directly from storage
+   */
+  static async streamArtifact(req: Request, res: Response) {
+    try {
+      const { executionId, stepName, fileName } = req.params;
+
+      if (!executionId || !stepName || !fileName) {
+        return ResponseHelper.error(
+          res,
+          "Execution ID, step name, and file name are required",
+          400
+        );
+      }
+
+      const key = `${executionId}/${stepName}/${fileName}`;
+
+      // Stream the artifact through the backend
+      await ArtifactController.artifactService.streamArtifact(key, res);
+    } catch (error: any) {
+      console.error("[ARTIFACT_CONTROLLER] Stream artifact failed:", error);
+      if (!res.headersSent) {
+        return ResponseHelper.error(
+          res,
+          error.message || "Failed to stream artifact",
+          500
+        );
+      }
+    }
+  }
+
+  /**
    * Get artifacts for all executions (admin endpoint)
    */
   static async getAllArtifacts(req: Request, res: Response) {
     try {
       const { limit = 50, offset = 0 } = req.query;
-
 
       return ResponseHelper.success(
         res,

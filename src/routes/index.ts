@@ -7,6 +7,7 @@ import pipelineRoutes from "./pipeline.routes";
 import queueRoutes from "./queue.routes";
 import artifactRoutes from "./artifact.routes";
 import secretsRoutes from "./secrets.routes";
+import userRoutes from "./user.routes";
 
 const router = Router();
 
@@ -19,6 +20,7 @@ router.use("/pipeline", pipelineRoutes);
 router.use("/queue", queueRoutes);
 router.use("/artifacts", artifactRoutes);
 router.use("/secrets", secretsRoutes);
+router.use("/user", userRoutes);
 
 // Health check endpoint
 router.get("/health", (req, res) => {

@@ -21,7 +21,13 @@ export class PipelineService {
     repoName: string,
     branch?: string,
     repository?: { name: string; full_name: string },
-    triggerCommit?: { id: string; message: string }
+    triggerCommit?: { id: string; message: string },
+    triggerUser?: {
+      userId: string;
+      login: string;
+      name?: string;
+      email?: string;
+    }
   ): Promise<string> {
     // Route to DAG execution (supports both parallel and sequential steps)
     return this.executePipelineDAG(
@@ -29,7 +35,8 @@ export class PipelineService {
       repoName,
       branch,
       repository,
-      triggerCommit
+      triggerCommit,
+      triggerUser
     );
   }
 
@@ -39,7 +46,13 @@ export class PipelineService {
     repoName: string,
     branch?: string,
     repository?: { name: string; full_name: string },
-    triggerCommit?: { id: string; message: string }
+    triggerCommit?: { id: string; message: string },
+    triggerUser?: {
+      userId: string;
+      login: string;
+      name?: string;
+      email?: string;
+    }
   ): Promise<string> {
     const executionId = `dag-${repoName}-${Date.now()}`;
     const execution: PipelineExecution = {
@@ -57,6 +70,11 @@ export class PipelineService {
       repoName,
       branch,
       repository: repository || { name: repoName, full_name: repoName },
+      triggerCommit,
+      triggerAuthorName: triggerUser?.name,
+      triggerAuthorEmail: triggerUser?.email,
+      triggerUserId: triggerUser?.userId,
+      triggerUserLogin: triggerUser?.login,
     });
 
     execution.id = queueExecutionId;

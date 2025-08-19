@@ -15,8 +15,11 @@ router.get(
   PipelineController.getExecutionLogs
 );
 
-// GET /api/pipeline/executions - Get all executions or filter by repo
+// GET /api/pipeline/executions - Get executions for authenticated user
 router.get("/executions", PipelineController.getExecutions);
+
+// GET /api/pipeline/debug/all-executions - Debug endpoint to see all executions
+router.get("/debug/all-executions", PipelineController.getAllExecutionsDebug);
 
 // POST /api/pipeline/validate - Validate pipeline configuration
 router.post("/validate", PipelineController.validatePipelineConfig);

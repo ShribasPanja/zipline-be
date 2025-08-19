@@ -186,21 +186,6 @@ export class GitHubService {
 
       console.log(`[INFO] Successfully created webhook for ${repoFullName}`);
 
-      // Log webhook setup activity
-      ActivityService.addActivity({
-        type: "webhook_setup",
-        repository: {
-          name: repoFullName.split("/")[1],
-          full_name: repoFullName,
-        },
-        status: "success",
-        metadata: {
-          webhook_url: hookUrl,
-          events: ["push"],
-          webhook_id: response.data.id,
-        },
-      });
-
       return response.data;
     } catch (error: any) {
       console.error(

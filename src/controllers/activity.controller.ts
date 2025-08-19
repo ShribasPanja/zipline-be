@@ -42,7 +42,35 @@ export class ActivityController {
   ): Promise<void> {
     try {
       const limit = req.query.limit ? parseInt(req.query.limit as string) : 10;
-      const activities = ActivityService.getRecentActivities(limit);
+
+      // Get user info from authentication header to filter activities
+      let userId: string | undefined;
+      const authHeader = req.headers.authorization;
+      if (authHeader && authHeader.startsWith("Bearer ")) {
+        try {
+          const token = authHeader.substring(7);
+          const { GitHubService } = await import("../services/github.service");
+          const userInfo = await GitHubService.getUserInfo(token);
+          userId = userInfo.id.toString();
+          console.log(
+            `[API] Filtering activities for user: ${userInfo.login} (${userId})`
+          );
+        } catch (error) {
+          console.warn(
+            "[API] Could not get user info for activity filtering:",
+            error
+          );
+          // Continue without filtering - will show no activities for unauthenticated users
+        }
+      }
+
+      const activities = ActivityService.getRecentActivities(limit, userId);
+      console.log(
+        `[API] Found ${activities.length} activities for user ${
+          userId || "anonymous"
+        }`
+      );
+
       ResponseHelper.success(
         res,
         activities,

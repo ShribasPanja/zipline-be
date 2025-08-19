@@ -1,4 +1,3 @@
-//previous gen now using DAG queue
 import { Queue, Worker, Job } from "bullmq";
 import IORedis from "ioredis";
 import { PipelineHelper } from "../helpers/pipeline.helper";
@@ -10,7 +9,6 @@ import SocketService from "../services/socket.service";
 import { existsSync } from "fs";
 import path from "path";
 
-// Redis connection configuration
 const connection = new IORedis({
   host: process.env.REDIS_HOST || "localhost",
   port: parseInt(process.env.REDIS_PORT || "6379"),
@@ -18,7 +16,6 @@ const connection = new IORedis({
   enableReadyCheck: false,
 });
 
-// Test Redis connection
 connection.on("connect", () => {
   console.log("[QUEUE] Connected to Redis successfully");
 });
@@ -30,7 +27,6 @@ connection.on("error", (error) => {
   );
 });
 
-// Pipeline job data interface
 interface PipelineJobData {
   repoUrl: string;
   repoName: string;
@@ -46,15 +42,16 @@ interface PipelineJobData {
   };
   triggerAuthorName?: string;
   triggerAuthorEmail?: string;
+  triggerUserId?: string; // GitHub user ID who triggered the pipeline
+  triggerUserLogin?: string; // GitHub username who triggered the pipeline
 }
 
-// The queue that holds pipeline jobs
 export const pipelineQueue = new Queue<PipelineJobData>("pipeline-jobs", {
   connection,
   defaultJobOptions: {
-    removeOnComplete: 10, // Keep last 10 completed jobs
-    removeOnFail: 50, // Keep last 50 failed jobs for debugging
-    attempts: 3, // Retry failed jobs up to 3 times
+    removeOnComplete: 10,
+    removeOnFail: 50,
+    attempts: 3,
     backoff: {
       type: "exponential",
       delay: 2000,
@@ -62,7 +59,6 @@ export const pipelineQueue = new Queue<PipelineJobData>("pipeline-jobs", {
   },
 });
 
-// The worker that processes jobs from the queue
 export const pipelineWorker = new Worker<PipelineJobData>(
   "pipeline-jobs",
   async (job: Job<PipelineJobData>) => {
@@ -79,15 +75,12 @@ export const pipelineWorker = new Worker<PipelineJobData>(
       `[QUEUE] Processing pipeline job ${job.id} for ${repoName} (execution: ${executionId})`
     );
 
-    // Initialize logger for this execution
     const logger = new PipelineLoggerService(executionId);
     await logger.init();
 
-    // Get socket service for status updates
     const socketService = SocketService.getInstance();
 
     try {
-      // Update job progress and emit status
       await job.updateProgress(10);
       await logger.info(`Pipeline execution started for ${repoName}`, "QUEUE");
       socketService.emitPipelineStatus(executionId, "running", {
@@ -95,20 +88,22 @@ export const pipelineWorker = new Worker<PipelineJobData>(
         progress: 10,
       });
 
-      // Log pipeline start activity
-      ActivityService.addActivity({
-        type: "pipeline_execution",
-        repository,
-        status: "in_progress",
-        metadata: {
-          executionId,
-          jobId: job.id,
-          trigger: "webhook",
-          commit_id: triggerCommit?.id,
-          branch: branch || "main",
-          started_at: new Date().toISOString(),
+      await ActivityService.addPipelineExecutionActivity(
+        {
+          type: "pipeline_execution",
+          repository,
+          status: "in_progress",
+          metadata: {
+            executionId,
+            jobId: job.id,
+            trigger: "webhook",
+            commit_id: triggerCommit?.id,
+            branch: branch || "main",
+            started_at: new Date().toISOString(),
+          },
         },
-      });
+        repository.full_name
+      );
 
       await job.updateProgress(20);
       socketService.emitPipelineStatus(executionId, "running", {
@@ -116,7 +111,6 @@ export const pipelineWorker = new Worker<PipelineJobData>(
         progress: 20,
       });
 
-      // Execute the pipeline - this will clone repo and validate pipeline config
       await logger.info(
         `Starting repository clone and validation for ${branch || "main"}`,
         "CLONE"
@@ -131,7 +125,7 @@ export const pipelineWorker = new Worker<PipelineJobData>(
         repoName,
         branch,
         true
-      ); // Skip cleanup
+      );
 
       if (!pipelineResult.success) {
         await logger.error(
@@ -148,7 +142,6 @@ export const pipelineWorker = new Worker<PipelineJobData>(
 
       await job.updateProgress(40);
 
-      // Now get the pipeline config and execute steps with Docker
       const tempDir = pipelineResult.tempDir;
       if (!tempDir || !existsSync(tempDir)) {
         throw new Error(
@@ -167,18 +160,18 @@ export const pipelineWorker = new Worker<PipelineJobData>(
           progress: 50,
         });
 
-        // Update database to IN_PROGRESS status before starting execution
         try {
           await PipelineRunRepository.updateByExecutionId(executionId, {
             status: "IN_PROGRESS",
             startedAt: new Date(),
           });
-          console.log(`[QUEUE] Updated database status to IN_PROGRESS for execution: ${executionId}`);
+          console.log(
+            `[QUEUE] Updated database status to IN_PROGRESS for execution: ${executionId}`
+          );
         } catch (dbError) {
           console.warn(`[QUEUE] Failed to update database status: ${dbError}`);
         }
 
-        // Execute pipeline steps using Docker with real-time logging and database integration
         await logger.info(
           `Starting execution of ${pipeline.steps.length} pipeline steps`,
           "DOCKER"
@@ -187,7 +180,6 @@ export const pipelineWorker = new Worker<PipelineJobData>(
           `[QUEUE] Executing ${pipeline.steps.length} pipeline steps`
         );
 
-        // Create real-time output handler
         const onDockerOutput = async (
           output: string,
           isError: boolean = false
@@ -203,14 +195,14 @@ export const pipelineWorker = new Worker<PipelineJobData>(
         };
 
         try {
-          const dockerResult = await DockerExecutionService.executePipelineSteps(
-            pipeline.steps,
-            tempDir,
-            onDockerOutput,
-            executionId // Pass executionId for database updates on failure
-          );
+          const dockerResult =
+            await DockerExecutionService.executePipelineSteps(
+              pipeline.steps,
+              tempDir,
+              onDockerOutput,
+              executionId
+            );
 
-          // Log final step results summary
           for (const step of dockerResult.steps) {
             if (step.success) {
               await logger.info(
@@ -231,7 +223,6 @@ export const pipelineWorker = new Worker<PipelineJobData>(
             progress: 90,
           });
 
-          // Combine results
           const finalResult = {
             success: dockerResult.success,
             error: dockerResult.error,
@@ -244,17 +235,20 @@ export const pipelineWorker = new Worker<PipelineJobData>(
               "All pipeline steps completed successfully",
               "DOCKER"
             );
-            
-            // Update database with success status
+
             try {
               await PipelineRunRepository.updateByExecutionId(executionId, {
                 status: "SUCCESS",
                 finishedAt: new Date(),
                 durationMs: finalResult.duration,
               });
-              console.log(`[QUEUE] Updated database with success status for execution: ${executionId}`);
+              console.log(
+                `[QUEUE] Updated database with success status for execution: ${executionId}`
+              );
             } catch (dbError) {
-              console.warn(`[QUEUE] Failed to update database with success: ${dbError}`);
+              console.warn(
+                `[QUEUE] Failed to update database with success: ${dbError}`
+              );
             }
 
             socketService.emitPipelineStatus(executionId, "success", {
@@ -268,8 +262,7 @@ export const pipelineWorker = new Worker<PipelineJobData>(
               `Pipeline execution failed: ${finalResult.error}`,
               "DOCKER"
             );
-            
-            // Update database with failure status
+
             try {
               await PipelineRunRepository.updateByExecutionId(executionId, {
                 status: "FAILED",
@@ -277,9 +270,13 @@ export const pipelineWorker = new Worker<PipelineJobData>(
                 errorMessage: finalResult.error,
                 durationMs: finalResult.duration,
               });
-              console.log(`[QUEUE] Updated database with failure status for execution: ${executionId}`);
+              console.log(
+                `[QUEUE] Updated database with failure status for execution: ${executionId}`
+              );
             } catch (dbError) {
-              console.warn(`[QUEUE] Failed to update database with failure: ${dbError}`);
+              console.warn(
+                `[QUEUE] Failed to update database with failure: ${dbError}`
+              );
             }
 
             socketService.emitPipelineStatus(executionId, "failed", {
@@ -290,31 +287,34 @@ export const pipelineWorker = new Worker<PipelineJobData>(
             });
           }
 
-          // Log completion activity
-          ActivityService.addActivity({
-            type: "pipeline_execution",
-            status: finalResult.success ? "success" : "failed",
-            repository,
-            metadata: {
-              executionId,
-              jobId: job.id,
-              duration: `${Math.round(finalResult.duration / 1000)}s`,
-              steps_completed: finalResult.steps.filter((s: any) => s.success)
-                .length,
-              total_steps: finalResult.steps.length,
-              error: finalResult.error || undefined,
-              repoUrl,
-              branch: branch || "main",
-              completed_at: new Date().toISOString(),
+          await ActivityService.addPipelineExecutionActivity(
+            {
+              type: "pipeline_execution",
+              status: finalResult.success ? "success" : "failed",
+              repository,
+              metadata: {
+                executionId,
+                jobId: job.id,
+                duration: `${Math.round(finalResult.duration / 1000)}s`,
+                steps_completed: finalResult.steps.filter((s: any) => s.success)
+                  .length,
+                total_steps: finalResult.steps.length,
+                error: finalResult.error || undefined,
+                repoUrl,
+                branch: branch || "main",
+                completed_at: new Date().toISOString(),
+              },
             },
-          });
+            repository.full_name
+          );
 
           await job.updateProgress(100);
 
-          // Cleanup temp directory
           try {
             if (existsSync(tempDir)) {
-              console.log(`[QUEUE] Cleaning up temporary directory: ${tempDir}`);
+              console.log(
+                `[QUEUE] Cleaning up temporary directory: ${tempDir}`
+              );
               const { rm } = await import("fs/promises");
               await rm(tempDir, { recursive: true, force: true });
               await logger.info("Temporary directory cleaned up", "CLEANUP");
@@ -329,31 +329,26 @@ export const pipelineWorker = new Worker<PipelineJobData>(
             );
           }
 
-          // await logger.info(
-          //   "Pipeline execution completed successfully",
-          //   "COMPLETE"
-          // );
           console.log(`[QUEUE] Pipeline job ${job.id} completed successfully`);
           return {
             success: true,
             executionId,
             result: finalResult,
           };
-
         } catch (dockerError: any) {
-          // Handle Docker execution errors
-          console.error(`[QUEUE] Docker execution failed:`, dockerError.message);
+          console.error(
+            `[QUEUE] Docker execution failed:`,
+            dockerError.message
+          );
           await logger.error(
             `Docker execution failed: ${dockerError.message}`,
             "DOCKER_ERROR"
           );
 
-          // Emit failure status
           socketService.emitPipelineStatus(executionId, "failed", {
             error: dockerError.message,
           });
 
-          // Re-throw to be caught by outer catch
           throw dockerError;
         }
       } else {
@@ -370,36 +365,36 @@ export const pipelineWorker = new Worker<PipelineJobData>(
         "ERROR"
       );
 
-      // Emit failure status
       socketService.emitPipelineStatus(executionId, "failed", {
         error: error.message,
       });
 
-      // Log failure activity
-      ActivityService.addActivity({
-        type: "pipeline_execution",
-        status: "failed",
-        repository,
-        metadata: {
-          executionId,
-          jobId: job.id,
-          error: error.message,
-          repoUrl,
-          branch: branch || "main",
-          failed_at: new Date().toISOString(),
+      await ActivityService.addPipelineExecutionActivity(
+        {
+          type: "pipeline_execution",
+          status: "failed",
+          repository,
+          metadata: {
+            executionId,
+            jobId: job.id,
+            error: error.message,
+            repoUrl,
+            branch: branch || "main",
+            failed_at: new Date().toISOString(),
+          },
         },
-      });
+        repository.full_name
+      );
 
-      throw error; // Re-throw to mark job as failed
+      throw error;
     }
   },
   {
     connection,
-    concurrency: 3, // Process up to 3 jobs concurrently
+    concurrency: 3,
   }
 );
 
-// Queue event handlers
 pipelineQueue.on("error", (error) => {
   console.error("[QUEUE] Pipeline queue error:", error);
 });
@@ -418,17 +413,15 @@ pipelineWorker.on("completed", (job, result) => {
 
 console.log("[QUEUE] Pipeline queue and worker initialized");
 
-// Helper function to add a pipeline job to the queue
 export async function addPipelineJob(
   data: Omit<PipelineJobData, "executionId">
 ): Promise<string> {
   const executionId = `${data.repoName}-${Date.now()}`;
 
-  // Create initial database record BEFORE adding job to queue
   try {
     await PipelineRunRepository.create({
       executionId,
-      jobId: "pending", // Will be updated after job creation
+      jobId: "pending",
       repoName: data.repoName,
       repoFullName: data.repository.full_name,
       repoUrl: data.repoUrl,
@@ -438,13 +431,15 @@ export async function addPipelineJob(
       triggerMessage: data.triggerCommit?.message,
       triggerAuthorName: data.triggerAuthorName,
       triggerAuthorEmail: data.triggerAuthorEmail,
+      triggerUserId: data.triggerUserId,
+      triggerUserLogin: data.triggerUserLogin,
     });
     console.log(
       `[QUEUE] Created database record for execution: ${executionId}`
     );
   } catch (dbError) {
     console.warn(`[QUEUE] Failed to create database record: ${dbError}`);
-    throw dbError; // Don't proceed if we can't create the database record
+    throw dbError;
   }
 
   const job = await pipelineQueue.add(
@@ -454,8 +449,8 @@ export async function addPipelineJob(
       executionId,
     },
     {
-      priority: 1, // Higher priority for webhook-triggered pipelines
-      delay: 0, // Execute immediately
+      priority: 1,
+      delay: 0,
     }
   );
 
@@ -463,7 +458,6 @@ export async function addPipelineJob(
     `[QUEUE] Added pipeline job ${job.id} for ${data.repoName} (execution: ${executionId})`
   );
 
-  // Update the job ID in the database record
   try {
     await PipelineRunRepository.updateByExecutionId(executionId, {
       jobId: String(job.id),
@@ -475,7 +469,6 @@ export async function addPipelineJob(
   return executionId;
 }
 
-// Helper function to get job status
 export async function getPipelineJobStatus(executionId: string) {
   const jobs = await pipelineQueue.getJobs([
     "waiting",

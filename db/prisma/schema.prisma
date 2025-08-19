@@ -34,6 +34,8 @@ model PipelineRun {
   triggerMessage     String?
   triggerAuthorName  String?
   triggerAuthorEmail String?
+  triggerUserId      String? // GitHub user ID who triggered the pipeline
+  triggerUserLogin   String? // GitHub username who triggered the pipeline  
   queuedAt           DateTime       @default(now())
   startedAt          DateTime?
   finishedAt         DateTime?
@@ -60,6 +62,20 @@ model PipelineLog {
 
   @@index([runId])
   @@map("pipeline_logs")
+}
+
+model RepositoryOwner {
+  id           String   @id @default(cuid())
+  repoFullName String   @unique // e.g., "owner/repo"
+  userId       String // GitHub user ID who set up the webhook
+  userLogin    String // GitHub username who set up the webhook
+  userName     String? // GitHub display name
+  userEmail    String? // GitHub email
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([repoFullName])
+  @@map("repository_owners")
 }
 
 model RepositorySecret {

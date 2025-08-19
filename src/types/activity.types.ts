@@ -18,6 +18,12 @@ export interface Activity {
     name: string;
     email: string;
   };
+  user?: {
+    id: string;
+    login: string;
+    name?: string;
+    email?: string;
+  };
   status: "success" | "failed" | "in_progress";
   metadata?: Record<string, any>;
 }
@@ -25,6 +31,8 @@ export interface Activity {
 export interface ActivityFilter {
   type?: string;
   repository?: string;
+  userId?: string;
+  userLogin?: string;
   limit?: number;
   offset?: number;
 }

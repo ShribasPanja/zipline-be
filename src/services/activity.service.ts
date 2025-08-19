@@ -39,6 +39,18 @@ export class ActivityService {
       );
     }
 
+    if (filter.userId) {
+      filtered = filtered.filter(
+        (activity) => activity.user?.id === filter.userId
+      );
+    }
+
+    if (filter.userLogin) {
+      filtered = filtered.filter(
+        (activity) => activity.user?.login === filter.userLogin
+      );
+    }
+
     // Apply pagination
     const offset = filter.offset || 0;
     const limit = filter.limit || 20;
@@ -46,8 +58,15 @@ export class ActivityService {
     return filtered.slice(offset, offset + limit);
   }
 
-  static getRecentActivities(limit: number = 10): Activity[] {
-    return this.activities.slice(0, limit);
+  static getRecentActivities(limit: number = 10, userId?: string): Activity[] {
+    let filtered = [...this.activities];
+
+    // Filter by user if userId is provided
+    if (userId) {
+      filtered = filtered.filter((activity) => activity.user?.id === userId);
+    }
+
+    return filtered.slice(0, limit);
   }
 
   static clearActivities(): void {
@@ -110,6 +129,43 @@ export class ActivityService {
     });
 
     console.log("[INFO] Seeded sample activities");
+  }
+
+  static async addPipelineExecutionActivity(
+    activityData: Omit<Activity, "id" | "timestamp" | "user">,
+    repoFullName?: string
+  ): Promise<Activity> {
+    let user: Activity["user"] = undefined;
+
+    // Try to get user info from repository owner if available
+    if (repoFullName) {
+      try {
+        const { RepositoryOwnerRepository } = await import(
+          "../repositories/repositoryOwner.repository"
+        );
+        const repoOwner = await RepositoryOwnerRepository.findByRepoFullName(
+          repoFullName
+        );
+        if (repoOwner) {
+          user = {
+            id: repoOwner.userId,
+            login: repoOwner.userLogin,
+            name: repoOwner.userName || undefined,
+            email: repoOwner.userEmail || undefined,
+          };
+        }
+      } catch (error) {
+        console.warn(
+          "[ACTIVITY] Could not get repository owner for activity:",
+          error
+        );
+      }
+    }
+
+    return this.addActivity({
+      ...activityData,
+      user,
+    });
   }
 
   private static generateId(): string {

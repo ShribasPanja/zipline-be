@@ -16,6 +16,15 @@ export class WebhookService {
       console.log(`[INFO] Pushed by: ${pusher.name} (${pusher.email})`);
       console.log(`[INFO] Commit ID: ${head_commit.id}`);
 
+      // Get repository owner info to associate activity with the user who set up the webhook
+      const { RepositoryOwnerRepository } = await import(
+        "../repositories/repositoryOwner.repository"
+      );
+
+      const repoOwner = await RepositoryOwnerRepository.findByRepoFullName(
+        repository.full_name
+      );
+
       // Log the push activity
       ActivityService.addActivity({
         type: "push",
@@ -35,6 +44,14 @@ export class WebhookService {
           name: pusher.name,
           email: pusher.email,
         },
+        user: repoOwner
+          ? {
+              id: repoOwner.userId,
+              login: repoOwner.userLogin,
+              name: repoOwner.userName || undefined,
+              email: repoOwner.userEmail || undefined,
+            }
+          : undefined,
         status: "success",
         metadata: {
           ref: payload.ref,
@@ -42,14 +59,25 @@ export class WebhookService {
           after: payload.after,
           commits_count: payload.commits?.length || 1,
         },
-      });
-
-      // Trigger pipeline execution asynchronously
+      }); // Trigger pipeline execution asynchronously
       console.log(
         `[INFO] Triggering pipeline for ${repository.name} (${repository.clone_url}) on branch ${branchName}`
       );
 
       try {
+        // Get repository owner info to associate pipeline with the user who set up the webhook
+        const { RepositoryOwnerRepository } = await import(
+          "../repositories/repositoryOwner.repository"
+        );
+
+        const repoOwner = await RepositoryOwnerRepository.findByRepoFullName(
+          repository.full_name
+        );
+
+        console.log(
+          `[WEBHOOK] Found repository owner: ${repoOwner?.userLogin} (${repoOwner?.userId}) for ${repository.full_name}`
+        );
+
         const executionId = await PipelineService.executePipelineAsync(
           repository.clone_url,
           repository.name,
@@ -61,7 +89,15 @@ export class WebhookService {
           {
             id: head_commit.id,
             message: head_commit.message,
-          }
+          },
+          repoOwner
+            ? {
+                userId: repoOwner.userId,
+                login: repoOwner.userLogin,
+                name: head_commit.author.name, // Use commit author name for display
+                email: head_commit.author.email, // Use commit author email for display
+              }
+            : undefined
         );
 
         console.log(

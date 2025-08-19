@@ -1,5 +1,10 @@
 import archiver from "archiver";
-import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
+import {
+  S3Client,
+  PutObjectCommand,
+  GetObjectCommand,
+} from "@aws-sdk/client-s3";
+import { Response } from "express";
 import { v4 as uuidv4 } from "uuid";
 import fs from "fs";
 import path from "path";
@@ -29,14 +34,20 @@ export class ArtifactService {
   constructor() {
     // Get configuration from environment variables
     this.bucketName = process.env.AWS_S3_BUCKET || "zipline-artifacts";
-    
+
     // Configure S3 client for AWS S3 or MinIO
     this.s3Client = new S3Client({
       endpoint: process.env.MINIO_ENDPOINT || undefined, // Use AWS S3 if not set
       region: process.env.AWS_REGION || "us-east-1",
       credentials: {
-        accessKeyId: process.env.AWS_ACCESS_KEY_ID || process.env.MINIO_ACCESS_KEY || "",
-        secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY || process.env.MINIO_SECRET_KEY || "",
+        accessKeyId:
+          process.env.AWS_ACCESS_KEY_ID ||
+          process.env.MINIO_ACCESS_KEY ||
+          "admin",
+        secretAccessKey:
+          process.env.AWS_SECRET_ACCESS_KEY ||
+          process.env.MINIO_SECRET_KEY ||
+          "StrongPass123",
       },
       forcePathStyle: !!process.env.MINIO_ENDPOINT, // Required for MinIO, optional for AWS
     });
@@ -246,8 +257,10 @@ export class ArtifactService {
   async initializeBucket(): Promise<void> {
     try {
       console.log(`[ARTIFACT] Initializing bucket: ${this.bucketName}`);
-      console.log(`[ARTIFACT] Using endpoint: ${process.env.MINIO_ENDPOINT || 'AWS S3'}`);
-      
+      console.log(
+        `[ARTIFACT] Using endpoint: ${process.env.MINIO_ENDPOINT || "AWS S3"}`
+      );
+
       // Try to create bucket (MinIO will ignore if it already exists)
       const { CreateBucketCommand, HeadBucketCommand } = await import(
         "@aws-sdk/client-s3"
@@ -277,7 +290,7 @@ export class ArtifactService {
         message: error.message,
         code: error.code,
         statusCode: error.$metadata?.httpStatusCode,
-        requestId: error.$metadata?.requestId
+        requestId: error.$metadata?.requestId,
       });
       throw error;
     }
@@ -331,6 +344,58 @@ export class ArtifactService {
     } catch (error: any) {
       console.error(`[ARTIFACT] Failed to list artifacts:`, error);
       throw new Error(`Failed to list artifacts: ${error.message}`);
+    }
+  }
+
+  /**
+   * Stream artifact directly from S3/MinIO to response
+   */
+  async streamArtifact(key: string, res: Response): Promise<void> {
+    try {
+      const command = new GetObjectCommand({
+        Bucket: this.bucketName,
+        Key: key,
+      });
+
+      const response = await this.s3Client.send(command);
+
+      if (!response.Body) {
+        throw new Error("Artifact not found");
+      }
+
+      // Set appropriate headers
+      if (response.ContentType) {
+        res.setHeader("Content-Type", response.ContentType);
+      }
+      if (response.ContentLength) {
+        res.setHeader("Content-Length", response.ContentLength);
+      }
+
+      // Set content disposition to trigger download
+      const fileName = key.split("/").pop() || "artifact";
+      res.setHeader(
+        "Content-Disposition",
+        `attachment; filename="${fileName}"`
+      );
+
+      // Stream the file
+      const stream = response.Body as NodeJS.ReadableStream;
+      stream.pipe(res);
+
+      // Handle stream events
+      stream.on("error", (error) => {
+        console.error(`[ARTIFACT] Stream error for key ${key}:`, error);
+        if (!res.headersSent) {
+          res.status(500).json({ error: "Failed to stream artifact" });
+        }
+      });
+
+      stream.on("end", () => {
+        console.log(`[ARTIFACT] Successfully streamed artifact: ${key}`);
+      });
+    } catch (error: any) {
+      console.error(`[ARTIFACT] Failed to stream artifact ${key}:`, error);
+      throw new Error(`Failed to stream artifact: ${error.message}`);
     }
   }
 }

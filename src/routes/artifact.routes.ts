@@ -28,6 +28,16 @@ router.get(
 );
 
 /**
+ * @route GET /api/artifacts/:executionId/:stepName/:fileName/stream
+ * @desc Stream artifact directly through backend
+ * @access Public (should be protected in production)
+ */
+router.get(
+  "/:executionId/:stepName/:fileName/stream",
+  ArtifactController.streamArtifact
+);
+
+/**
  * @route GET /api/artifacts/:executionId/:stepName/:fileName/metadata
  * @desc Get metadata for a specific artifact
  * @access Public (should be protected in production)
