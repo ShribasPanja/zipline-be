@@ -4,6 +4,9 @@ import path from "path";
 import { simpleGit } from "simple-git";
 import { existsSync } from "fs";
 import micromatch from "micromatch";
+import { exec } from "child_process";
+import { promisify } from "util";
+const execPromise = promisify(exec);
 
 interface Step {
   name: string;
@@ -163,7 +166,7 @@ export class PipelineHelper {
     } finally {
       if (!skipCleanup && existsSync(tempDir)) {
         try {
-          await rm(tempDir, { recursive: true, force: true });
+        await execPromise(`sudo rm -rf ${tempDir}`);
         } catch (cleanupError) {
           console.warn(`Failed to cleanup temp directory: ${cleanupError}`);
         }

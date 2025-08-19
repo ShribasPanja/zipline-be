@@ -15,6 +15,10 @@ import { ActivityService } from "../services/activity.service";
 import { PipelineHelper } from "../helpers/pipeline.helper";
 import path from "path";
 import { existsSync } from "fs";
+import { exec } from "child_process";
+import { promisify } from "util";
+const execPromise = promisify(exec);
+
 
 const connection = new IORedis({
   host: process.env.REDIS_HOST || "localhost",
@@ -627,8 +631,7 @@ async function finalize(
         `Cleaning up temporary directory: ${jobData.workingDir}`,
         "CLEANUP"
       );
-      const { rm } = await import("fs/promises");
-      await rm(jobData.workingDir, { recursive: true, force: true });
+      await execPromise(`sudo rm -rf ${jobData.workingDir}`);
       await logger.info("Temporary directory cleaned up", "CLEANUP");
     }
   } catch (cleanupError) {
